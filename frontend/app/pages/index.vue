@@ -6,9 +6,9 @@ const apiBase = config.public.apiBaseUrl
 
 // Mock users for local testing
 const mockUsers = [
-  { id: '11111111-1111-1111-1111-111111111111', name: 'Alex (User A)', avatar: '🧑‍💻' },
-  { id: '22222222-2222-2222-2222-222222222222', name: 'Blake (User B)', avatar: '👩‍🔬' },
-  { id: '33333333-3333-3333-3333-333333333333', name: 'Charlie (User C)', avatar: '👨‍🎨' }
+  { id: '11111111-1111-1111-1111-111111111111', name: 'Alex', room: 'Room 304', avatar: '🧑‍💻' },
+  { id: '22222222-2222-2222-2222-222222222222', name: 'Blake', room: 'Room 102', avatar: '👩‍🔬' },
+  { id: '33333333-3333-3333-3333-333333333333', name: 'Charlie', room: 'Room 215', avatar: '👨‍🎨' }
 ]
 
 // App state
@@ -16,6 +16,9 @@ const currentUser = ref(mockUsers[0])
 const machines = ref([])
 const loading = ref(true)
 const errorMsg = ref('')
+
+// Filter state
+const activeTab = ref('all') // 'all', 'washers', 'dryers', 'available', 'my'
 
 // Toast notifications
 const toasts = ref([])
@@ -49,7 +52,7 @@ const fetchMachines = async () => {
     errorMsg.value = ''
   } catch (err) {
     console.error('Failed to fetch machines:', err)
-    errorMsg.value = 'Failed to connect to the backend server.'
+    errorMsg.value = 'Failed to connect to the WashQueue local backend.'
   } finally {
     loading.value = false
   }
@@ -70,7 +73,6 @@ let broadcastChannel = null
 const setupRealtime = () => {
   if (!$supabase) return
 
-  // Subscribe to DB updates
   dbChannel = $supabase
     .channel('laundry_db_changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'machines' }, () => {
@@ -84,7 +86,6 @@ const setupRealtime = () => {
     })
     .subscribe()
 
-  // Subscribe to Realtime Broadcasts for owner pings
   broadcastChannel = $supabase.channel('laundry_broadcast')
   broadcastChannel
     .on('broadcast', { event: 'ping_alert' }, ({ payload }) => {
@@ -101,29 +102,25 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (dbChannel) $supabase.removeChannel(dbChannel)
-  if (broadcastChannel) $supabase.removeChannel(broadcastChannel)
+  if (dbChannel && $supabase) $supabase.removeChannel(dbChannel)
+  if (broadcastChannel && $supabase) $supabase.removeChannel(broadcastChannel)
 })
 
-
-// Check if current user is the owner of the active booking
+// Owner & Queue helpers
 const isOwner = (machine) => {
   return machine.active_booking && machine.active_booking.user_id === currentUser.value.id
 }
 
-// Check if current user is in the queue for a machine
 const getQueuePosition = (machine) => {
   const idx = machine.queue.findIndex(q => q.user_id === currentUser.value.id)
   return idx !== -1 ? idx + 1 : null
 }
 
-// Check if current user is notified for a machine
 const isNotified = (machine) => {
   const entry = machine.queue.find(q => q.user_id === currentUser.value.id)
   return entry && entry.status === 'notified'
 }
 
-// Timer helpers
 const getSecondsRemaining = (estimatedEndAt) => {
   const diff = new Date(estimatedEndAt).getTime() - now.value
   return diff <= 0 ? 0 : Math.floor(diff / 1000)
@@ -135,6 +132,23 @@ const formatTime = (seconds) => {
   return `${mm}:${ss}`
 }
 
+// Filtered Machines Computed
+const filteredMachines = computed(() => {
+  if (activeTab.value === 'washers') {
+    return machines.value.filter(m => m.name.toLowerCase().includes('washer'))
+  }
+  if (activeTab.value === 'dryers') {
+    return machines.value.filter(m => m.name.toLowerCase().includes('dryer'))
+  }
+  if (activeTab.value === 'available') {
+    return machines.value.filter(m => m.status === 'available')
+  }
+  if (activeTab.value === 'my') {
+    return machines.value.filter(isOwner)
+  }
+  return machines.value
+})
+
 // API Actions
 const claimMachine = async (machineId) => {
   try {
@@ -142,7 +156,8 @@ const claimMachine = async (machineId) => {
       method: 'POST',
       body: { user_id: currentUser.value.id }
     })
-    addToast('Machine claimed successfully! Cycle started (45 min).', 'success')
+    addToast('Machine claimed successfully! Cycle started.', 'success')
+    fetchMachines()
   } catch (err) {
     addToast(err.data?.detail || 'Failed to claim machine.', 'error')
   }
@@ -154,6 +169,7 @@ const clearMachine = async (machineId) => {
       method: 'POST'
     })
     addToast('Machine cleared and is now available.', 'success')
+    fetchMachines()
   } catch (err) {
     addToast(err.data?.detail || 'Failed to clear machine.', 'error')
   }
@@ -165,8 +181,6 @@ const pingOwner = async (machineId) => {
       method: 'POST',
       body: { user_id: currentUser.value.id }
     })
-    
-    // Broadcast ping alert to Supabase
     if (broadcastChannel && res.owner_user_id) {
       broadcastChannel.send({
         type: 'broadcast',
@@ -190,6 +204,7 @@ const joinQueue = async (machineId) => {
       body: { user_id: currentUser.value.id }
     })
     addToast('Joined the waitlist queue.', 'success')
+    fetchMachines()
   } catch (err) {
     addToast(err.data?.detail || 'Failed to join queue.', 'error')
   }
@@ -202,213 +217,223 @@ const leaveQueue = async (machineId) => {
       body: { user_id: currentUser.value.id }
     })
     addToast('Left the waitlist queue.', 'success')
+    fetchMachines()
   } catch (err) {
     addToast(err.data?.detail || 'Failed to leave queue.', 'error')
   }
 }
 
-// Trigger background scheduler overdue check
 const triggerSchedulerTick = async () => {
   try {
-    const res = await $fetch(`${apiBase}/api/scheduler/tick`, {
-      method: 'POST'
-    })
+    const res = await $fetch(`${apiBase}/api/scheduler/tick`, { method: 'POST' })
     if (res.updated_count > 0) {
       addToast(`Scheduler updated ${res.updated_count} machine(s) to Idle-Full.`, 'success')
     } else {
       addToast('Scheduler tick: No overdue machines found.', 'info')
     }
+    fetchMachines()
   } catch (err) {
     addToast('Failed to trigger scheduler tick.', 'error')
-  }
-}
-
-// UI State computed helpers
-const getMachineState = (machine) => {
-  if (machine.status === 'available') {
-    return {
-      label: 'Available',
-      class: 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400',
-      dot: 'bg-emerald-400 shadow-emerald-400/50'
-    }
-  }
-  
-  if (machine.status === 'in_use') {
-    const seconds = getSecondsRemaining(machine.active_booking?.estimated_end_at)
-    if (seconds === 0) {
-      return {
-        label: 'Cycle Complete (Occupied)',
-        class: 'border-amber-500/30 bg-amber-950/20 text-amber-400',
-        dot: 'bg-amber-400 shadow-amber-400/50 animate-pulse'
-      }
-    }
-    return {
-      label: 'In Use',
-      class: 'border-rose-500/30 bg-rose-950/20 text-rose-400',
-      dot: 'bg-rose-400 shadow-rose-400/50 animate-pulse'
-    }
-  }
-  
-  if (machine.status === 'idle_full') {
-    return {
-      label: 'Idle Full (Unloaded)',
-      class: 'border-amber-500/30 bg-amber-950/20 text-amber-400',
-      dot: 'bg-amber-500 shadow-amber-500/50'
-    }
-  }
-  
-  return {
-    label: 'Unknown',
-    class: 'border-slate-500/30 bg-slate-950/20 text-slate-400',
-    dot: 'bg-slate-400'
   }
 }
 </script>
 
 <template>
-  <div class="relative min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white pb-12 overflow-x-hidden">
-    <!-- Radiant Gradients -->
-    <div class="absolute top-[-10%] left-[-20%] w-[60vw] h-[60vw] rounded-full bg-indigo-900/10 blur-[120px] pointer-events-none"></div>
-    <div class="absolute bottom-[-10%] right-[-20%] w-[60vw] h-[60vw] rounded-full bg-violet-900/10 blur-[120px] pointer-events-none"></div>
-
-    <!-- Header Navigation -->
-    <header class="border-b border-slate-900 bg-slate-900/40 backdrop-blur-md sticky top-0 z-30 px-6 py-4">
-      <div class="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+  <div class="stitch-app min-h-screen bg-[#090D16] text-[#dfe2ef] selection:bg-[#10b981] selection:text-black">
+    <!-- Top Header -->
+    <header class="bg-[#090D16]/80 backdrop-blur-xl border-b border-white/10 sticky top-0 w-full z-50 px-6 py-4">
+      <div class="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <!-- Logo & Title -->
         <div class="flex items-center gap-3">
-          <div class="bg-indigo-600 p-2 rounded-xl text-2xl shadow-lg shadow-indigo-600/30">🌀</div>
+          <div class="w-10 h-10 rounded-xl bg-[#10b981]/10 border border-[#10b981]/30 flex items-center justify-center text-2xl shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+            🌀
+          </div>
           <div>
-            <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              WashQueue 
+            <h1 class="text-xl font-bold font-mono tracking-tight text-white flex items-center gap-2">
+              WASHQUEUE
               <span 
-                class="text-xs px-2.5 py-0.5 rounded-full font-mono font-bold border transition"
-                :class="isWsConnected ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-sky-500/20 text-sky-400 border-sky-500/30'"
+                class="text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-full border"
+                :class="isWsConnected ? 'bg-[#10b981]/10 text-[#4edea3] border-[#10b981]/30' : 'bg-sky-500/10 text-sky-400 border-sky-500/30'"
               >
                 {{ isWsConnected ? '🟢 Hostel LAN (WebSocket)' : '☁️ Remote Mobile' }}
               </span>
             </h1>
-            <p class="text-xs text-slate-400">Hostel Laundry Management & Telemetry Appliance</p>
+            <p class="text-xs text-[#86948a] font-mono">Neural Interface // Local IoT Telemetry</p>
           </div>
-
         </div>
 
+        <!-- Controls & Navigation -->
         <div class="flex flex-wrap items-center gap-3">
-          <!-- Admin Portal Link -->
-          <NuxtLink 
-            to="/admin" 
-            class="bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 text-violet-300 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
-          >
-            🔒 Admin Portal
-          </NuxtLink>
-
-          <!-- Simulation Tools -->
-          <div class="bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-1.5 flex items-center gap-2.5">
-            <span class="text-xs text-slate-400 font-medium">Active User:</span>
+          <!-- Active User Selector -->
+          <div class="glass-card px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-2">
+            <span class="text-xs text-[#86948a] font-mono font-medium">Student:</span>
             <select 
               v-model="currentUser"
-              class="bg-slate-950 border border-slate-800 text-sm font-semibold rounded-lg text-slate-100 px-2 py-1 focus:outline-none focus:border-indigo-500 cursor-pointer"
+              class="bg-transparent border-none text-sm font-mono font-semibold text-white focus:outline-none cursor-pointer"
             >
-              <option v-for="user in mockUsers" :key="user.id" :value="user">
-                {{ user.avatar }} {{ user.name }}
+              <option v-for="user in mockUsers" :key="user.id" :value="user" class="bg-[#0f131c] text-white">
+                {{ user.avatar }} {{ user.name }} ({{ user.room }})
               </option>
             </select>
           </div>
 
+          <!-- Scheduler Tick -->
           <button 
             @click="triggerSchedulerTick" 
-            class="bg-slate-900 hover:bg-slate-800 border border-slate-800 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
-            title="Simulates time passing to change expired bookings to Idle Full"
+            class="glass-card px-3 py-2 rounded-xl text-xs font-mono font-semibold hover:border-[#10b981]/40 transition active:scale-95 flex items-center gap-1.5"
           >
-            ⏱️ Trigger Scheduler Tick
+            ⏱️ Tick Scheduler
           </button>
+
+          <!-- Admin Portal Link -->
+          <NuxtLink 
+            to="/admin" 
+            class="bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/40 text-[#4edea3] px-3.5 py-2 rounded-xl text-xs font-mono font-bold uppercase tracking-wider transition flex items-center gap-1.5"
+          >
+            🔒 Admin Portal
+          </NuxtLink>
         </div>
       </div>
     </header>
 
-
-    <!-- Main Content Dashboard -->
-    <main class="max-w-7xl mx-auto px-6 mt-8 flex-1 w-full">
-      <div v-if="errorMsg" class="bg-rose-950/20 border border-rose-500/30 text-rose-300 rounded-2xl p-4 mb-6 flex items-center justify-between">
+    <!-- Main Content Canvas -->
+    <main class="max-w-7xl mx-auto px-6 pt-8 pb-16">
+      <!-- Error Message Banner -->
+      <div v-if="errorMsg" class="glass-card border-rose-500/40 bg-rose-950/20 text-rose-300 rounded-2xl p-4 mb-6 flex items-center justify-between">
         <div class="flex items-center gap-2.5">
           <span class="text-xl">⚠️</span>
-          <p class="text-sm font-medium">{{ errorMsg }} Please configure your Supabase settings.</p>
+          <p class="text-sm font-mono">{{ errorMsg }}</p>
         </div>
-        <button @click="fetchMachines" class="bg-rose-500/20 hover:bg-rose-500/30 px-3 py-1.5 rounded-lg text-xs font-bold transition">Retry Connection</button>
+        <button @click="fetchMachines" class="bg-rose-500/20 hover:bg-rose-500/30 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition">Retry Connection</button>
       </div>
 
-      <!-- Loading State -->
+      <!-- Loading Spinner -->
       <div v-if="loading" class="flex flex-col items-center justify-center py-24 gap-4">
-        <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-        <p class="text-slate-400 text-sm font-medium animate-pulse">Syncing laundry machine configurations...</p>
+        <div class="w-12 h-12 border-4 border-[#10b981] border-t-transparent rounded-full animate-spin"></div>
+        <p class="text-[#86948a] font-mono text-sm animate-pulse">Syncing smart plug telemetry & machine nodes...</p>
       </div>
 
-      <!-- Loaded Dashboard Grid -->
+      <!-- Main Dashboard Content -->
       <div v-else>
-        <!-- Headline Stats Summary -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <div class="bg-slate-900/40 border border-slate-900 rounded-xl p-4">
-            <p class="text-xs text-slate-400">Available Machines</p>
-            <p class="text-2xl font-black text-emerald-400 mt-1">
+        <!-- Metric Summary Grid (4 Stat Cards) -->
+        <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <!-- Stat Card 1: Available -->
+          <div class="glass-card rounded-2xl p-5 glow-emerald relative overflow-hidden">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-[#86948a] uppercase tracking-wider">Available Machines</span>
+              <span class="text-emerald-400 text-lg">🟢</span>
+            </div>
+            <p class="text-3xl font-mono font-bold text-[#4edea3] mt-2">
               {{ machines.filter(m => m.status === 'available').length }} / {{ machines.length }}
             </p>
           </div>
-          <div class="bg-slate-900/40 border border-slate-900 rounded-xl p-4">
-            <p class="text-xs text-slate-400">Currently Running</p>
-            <p class="text-2xl font-black text-rose-400 mt-1">
+
+          <!-- Stat Card 2: Running -->
+          <div class="glass-card rounded-2xl p-5 glow-rose relative overflow-hidden">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-[#86948a] uppercase tracking-wider">Currently Running</span>
+              <span class="text-rose-400 text-lg animate-spin">🌀</span>
+            </div>
+            <p class="text-3xl font-mono font-bold text-[#ffb2b7] mt-2">
               {{ machines.filter(m => m.status === 'in_use').length }}
             </p>
           </div>
-          <div class="bg-slate-900/40 border border-slate-900 rounded-xl p-4">
-            <p class="text-xs text-slate-400">Idle & Full</p>
-            <p class="text-2xl font-black text-amber-400 mt-1">
+
+          <!-- Stat Card 3: Idle Full -->
+          <div class="glass-card rounded-2xl p-5 glow-amber relative overflow-hidden">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-[#86948a] uppercase tracking-wider">Idle & Full (Unload)</span>
+              <span class="text-amber-400 text-lg">🧺</span>
+            </div>
+            <p class="text-3xl font-mono font-bold text-[#fbbf24] mt-2">
               {{ machines.filter(m => m.status === 'idle_full').length }}
             </p>
           </div>
-          <div class="bg-slate-900/40 border border-slate-900 rounded-xl p-4">
-            <p class="text-xs text-slate-400">My Running Cycles</p>
-            <p class="text-2xl font-black text-indigo-400 mt-1">
+
+          <!-- Stat Card 4: My Cycles -->
+          <div class="glass-card rounded-2xl p-5 glow-indigo relative overflow-hidden">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-[#86948a] uppercase tracking-wider">My Active Cycles</span>
+              <span class="text-indigo-400 text-lg">🧑‍💻</span>
+            </div>
+            <p class="text-3xl font-mono font-bold text-[#c0c1ff] mt-2">
               {{ machines.filter(isOwner).length }}
             </p>
           </div>
+        </section>
+
+        <!-- Filter Tabs -->
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+          <div class="flex items-center gap-2 bg-[#181b25] p-1.5 rounded-xl border border-white/10">
+            <button 
+              @click="activeTab = 'all'"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
+              :class="activeTab === 'all' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
+            >
+              All ({{ machines.length }})
+            </button>
+            <button 
+              @click="activeTab = 'washers'"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
+              :class="activeTab === 'washers' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
+            >
+              Washers
+            </button>
+            <button 
+              @click="activeTab = 'dryers'"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
+              :class="activeTab === 'dryers' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
+            >
+              Dryers
+            </button>
+            <button 
+              @click="activeTab = 'available'"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
+              :class="activeTab === 'available' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
+            >
+              Available
+            </button>
+            <button 
+              @click="activeTab = 'my'"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
+              :class="activeTab === 'my' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
+            >
+              My Laundry
+            </button>
+          </div>
+
+          <p class="text-xs font-mono text-[#86948a]">Showing {{ filteredMachines.length }} machine(s)</p>
         </div>
 
-        <h2 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
-          <span>⚡ Live Machine Status</span>
-          <span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
-        </h2>
-
-        <!-- Machines Cards List -->
+        <!-- Machine Cards Grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <div 
-            v-for="machine in machines" 
+            v-for="machine in filteredMachines" 
             :key="machine.id"
-            class="bg-slate-900/50 backdrop-blur-md border border-slate-900 rounded-2xl p-5 flex flex-col justify-between transition-all duration-300 hover:border-slate-800 hover:shadow-xl hover:shadow-indigo-950/10 group"
+            class="glass-card rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden group hover:border-[#10b981]/50 transition-all duration-300"
+            :class="{
+              'glow-emerald': machine.status === 'available',
+              'glow-rose': machine.status === 'in_use',
+              'glow-amber': machine.status === 'idle_full'
+            }"
           >
-            <!-- Card Upper Section -->
+            <!-- Card Header -->
             <div>
-              <div class="flex items-center justify-between mb-4">
-                <span class="text-slate-400 text-xs font-mono font-semibold">{{ machine.name.toUpperCase() }}</span>
-                <div class="flex items-center gap-2">
-                  <!-- Live Telemetry Wattage Badge -->
-                  <span 
-                    v-if="machine.latest_power_w !== null && machine.latest_power_w !== undefined" 
-                    class="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1"
-                    :title="`Live LAN Smart Plug Reading: ${machine.latest_power_w}W`"
-                  >
-                    ⚡ {{ machine.latest_power_w.toFixed(0) }}W
-                  </span>
-
-                  <!-- Status Badge -->
-                  <div class="flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold" :class="getMachineState(machine).class">
-                    <span class="w-1.5 h-1.5 rounded-full" :class="getMachineState(machine).dot"></span>
-                    {{ getMachineState(machine).label }}
-                  </div>
-                </div>
+              <div class="flex items-center justify-between mb-3">
+                <span class="text-white font-mono font-bold text-sm tracking-wider">{{ machine.name.toUpperCase() }}</span>
+                
+                <!-- Live Telemetry Wattage Pill -->
+                <span 
+                  v-if="machine.latest_power_w !== null && machine.latest_power_w !== undefined" 
+                  class="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1"
+                >
+                  ⚡ {{ machine.latest_power_w.toFixed(0) }}W
+                </span>
               </div>
 
-
               <!-- Animated Drum Display -->
-              <div class="flex items-center gap-4 my-4 p-3 bg-slate-950/50 border border-slate-900/80 rounded-xl">
-                <div class="relative w-12 h-12 rounded-full border border-slate-800 flex items-center justify-center bg-slate-900">
+              <div class="flex items-center gap-4 my-4 p-3 bg-[#0a0e17]/80 rounded-xl border border-white/10">
+                <div class="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center bg-[#181b25] relative">
                   <div 
                     class="text-2xl transition-transform duration-1000"
                     :class="{ 'animate-spin': machine.status === 'in_use' && getSecondsRemaining(machine.active_booking?.estimated_end_at) > 0 }"
@@ -418,146 +443,117 @@ const getMachineState = (machine) => {
                   </div>
                 </div>
 
-                <!-- Timer / Claim Holder details -->
                 <div>
-                  <!-- Countdown Timer -->
                   <div v-if="machine.status === 'in_use' && getSecondsRemaining(machine.active_booking?.estimated_end_at) > 0">
-                    <p class="text-xs text-slate-400">Time Remaining</p>
-                    <p class="text-xl font-bold font-mono text-rose-400 tracking-wider">
+                    <p class="text-[11px] font-mono text-[#86948a]">TIME REMAINING</p>
+                    <p class="text-xl font-mono font-bold text-rose-400 tracking-wider">
                       {{ formatTime(getSecondsRemaining(machine.active_booking?.estimated_end_at)) }}
                     </p>
                   </div>
 
-                  <!-- Cycle Complete Status -->
                   <div v-else-if="machine.status === 'in_use' && getSecondsRemaining(machine.active_booking?.estimated_end_at) === 0">
-                    <p class="text-xs text-amber-500 font-medium">Waiting to unload</p>
-                    <p class="text-sm font-bold text-amber-400">00:00</p>
+                    <p class="text-[11px] font-mono text-amber-400">UNLOAD NEEDED</p>
+                    <p class="text-sm font-mono font-bold text-amber-300">00:00</p>
                   </div>
 
-                  <!-- Available display -->
                   <div v-else-if="machine.status === 'available'">
-                    <p class="text-xs text-slate-400">Ready for laundry</p>
-                    <p class="text-sm font-bold text-emerald-400">Ready</p>
+                    <p class="text-[11px] font-mono text-[#86948a]">STATUS</p>
+                    <p class="text-sm font-mono font-bold text-emerald-400">READY</p>
                   </div>
 
-                  <!-- Idle Full Display -->
                   <div v-else-if="machine.status === 'idle_full'">
-                    <p class="text-xs text-slate-400">Done & Full</p>
-                    <p class="text-sm font-bold text-amber-500">Unload Needed</p>
+                    <p class="text-[11px] font-mono text-[#86948a]">DONE & FULL</p>
+                    <p class="text-sm font-mono font-bold text-amber-500">FINISHED</p>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <!-- Waitlist Section for this Card -->
-            <div class="my-4 border-t border-slate-900/80 pt-4">
-              <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
-                <span class="font-semibold flex items-center gap-1">📋 Waitlist Queue <span class="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded text-[10px]">{{ machine.queue.length }}</span></span>
-              </div>
-              
-              <!-- Virtual Waitlist list -->
-              <div v-if="machine.queue.length > 0" class="space-y-1.5 max-h-24 overflow-y-auto pr-1">
-                <div 
-                  v-for="(entry, index) in machine.queue" 
-                  :key="entry.id"
-                  class="flex items-center justify-between text-xs bg-slate-950/40 px-2.5 py-1.5 rounded-lg border border-slate-900"
-                  :class="{ 
-                    'border-indigo-500/20 bg-indigo-950/10 text-indigo-300': entry.user_id === currentUser.id,
-                    'border-amber-500/30 bg-amber-950/10 animate-pulse': entry.status === 'notified'
-                  }"
-                >
-                  <span class="font-medium flex items-center gap-1.5">
-                    <span class="w-4 h-4 text-[10px] rounded-full bg-slate-800 flex items-center justify-center font-mono">{{ index + 1 }}</span>
-                    <span>Student (..{{ entry.user_id.substring(0, 4) }})</span>
-                  </span>
-                  
-                  <span 
-                    v-if="entry.status === 'notified'" 
-                    class="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider"
-                  >
-                    Reserved
-                  </span>
-                  <span v-else class="text-[10px] text-slate-500 font-mono">Waiting</span>
+              <!-- Waitlist Queue Section -->
+              <div class="my-3 border-t border-white/10 pt-3">
+                <div class="flex items-center justify-between text-xs font-mono text-[#86948a] mb-2">
+                  <span>📋 WAITLIST ({{ machine.queue.length }})</span>
                 </div>
+                
+                <div v-if="machine.queue.length > 0" class="space-y-1 max-h-20 overflow-y-auto pr-1">
+                  <div 
+                    v-for="(entry, index) in machine.queue" 
+                    :key="entry.id"
+                    class="flex items-center justify-between text-xs font-mono px-2 py-1 rounded bg-[#181b25] border border-white/10"
+                    :class="{ 'border-indigo-500/40 text-indigo-300': entry.user_id === currentUser.id }"
+                  >
+                    <span>#{{ index + 1 }} Student (..{{ entry.user_id.substring(0, 4) }})</span>
+                    <span v-if="entry.status === 'notified'" class="text-[10px] text-amber-400 font-bold">RESERVED</span>
+                    <span v-else class="text-[10px] text-[#86948a]">WAITING</span>
+                  </div>
+                </div>
+                <p v-else class="text-xs font-mono text-[#86948a]/60 italic">Queue is empty.</p>
               </div>
-              <p v-else class="text-xs text-slate-500 italic py-1">Waitlist is currently empty.</p>
             </div>
 
-            <!-- Card Action Footer -->
-            <div class="border-t border-slate-900/80 pt-4 mt-2">
-              <!-- Available State Actions -->
-              <div v-if="machine.status === 'available'" class="space-y-2">
-                <!-- If current user is notified, they are allowed to claim -->
+            <!-- Card Actions -->
+            <div class="border-t border-white/10 pt-3 mt-2">
+              <div v-if="machine.status === 'available'">
                 <button 
                   v-if="isNotified(machine)"
                   @click="claimMachine(machine.id)"
-                  class="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95"
+                  class="w-full bg-[#fbbf24] hover:bg-amber-500 text-black font-mono font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95"
                 >
                   Claim My Reservation 🚀
                 </button>
                 <button 
                   v-else-if="machine.queue.length > 0"
                   disabled
-                  class="w-full bg-slate-800 text-slate-400 py-2.5 rounded-xl text-xs font-bold cursor-not-allowed flex items-center justify-center gap-1"
+                  class="w-full bg-[#181b25] text-[#86948a] font-mono py-2.5 rounded-xl text-xs cursor-not-allowed"
                 >
                   🔒 Reserved for Queue
                 </button>
                 <button 
                   v-else
                   @click="claimMachine(machine.id)"
-                  class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95"
+                  class="w-full bg-[#10b981] hover:bg-[#4edea3] text-[#003824] font-mono font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95"
                 >
                   Start Laundry 🚀
                 </button>
               </div>
 
-              <!-- In Use State Actions -->
-              <div v-else-if="machine.status === 'in_use'" class="space-y-2">
-                <!-- If current user owns the active booking, let them finish/clear -->
+              <div v-else-if="machine.status === 'in_use'">
                 <button 
                   v-if="isOwner(machine)"
                   @click="clearMachine(machine.id)"
-                  class="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95"
+                  class="w-full bg-rose-600 hover:bg-rose-500 text-white font-mono font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95"
                 >
                   Clear Machine 🛑
                 </button>
-                
-                <!-- Queue Actions for other users -->
+
                 <div v-else>
-                  <!-- Already in Queue -->
                   <button 
                     v-if="getQueuePosition(machine) !== null"
                     @click="leaveQueue(machine.id)"
-                    class="w-full bg-slate-800 hover:bg-slate-700 text-rose-400 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95"
+                    class="w-full bg-[#181b25] hover:bg-[#262a34] text-rose-400 font-mono py-2.5 rounded-xl text-xs transition active:scale-95"
                   >
                     Cancel Queue (Pos: #{{ getQueuePosition(machine) }}) ❌
                   </button>
-                  <!-- Join Queue -->
                   <button 
                     v-else
                     @click="joinQueue(machine.id)"
-                    class="w-full bg-slate-800 hover:bg-slate-700 text-indigo-400 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95"
+                    class="w-full bg-[#181b25] hover:bg-[#262a34] text-[#4edea3] font-mono font-bold py-2.5 rounded-xl text-xs transition active:scale-95"
                   >
                     Join Waitlist Queue 📋
                   </button>
                 </div>
               </div>
 
-              <!-- Idle Full State Actions -->
               <div v-else-if="machine.status === 'idle_full'" class="space-y-2">
-                <!-- Anyone can clear/unload an idle full machine -->
                 <button 
                   @click="clearMachine(machine.id)"
-                  class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95"
+                  class="w-full bg-[#10b981] hover:bg-[#4edea3] text-[#003824] font-mono font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95"
                 >
                   Unload & Make Available 🧺
                 </button>
-
-                <!-- Ping Owner Button (Visible to users in the queue for this machine) -->
                 <button 
                   v-if="getQueuePosition(machine) !== null"
                   @click="pingOwner(machine.id)"
-                  class="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 active:scale-95 animate-pulse"
+                  class="w-full bg-amber-500 hover:bg-amber-600 text-black font-mono font-bold py-2 rounded-xl text-xs animate-pulse"
                 >
                   📢 Ping Owner to Unload
                 </button>
@@ -568,46 +564,53 @@ const getMachineState = (machine) => {
       </div>
     </main>
 
-    <!-- Floating Live Toast Notifications System -->
+    <!-- Toast Notifications -->
     <div class="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full">
       <div 
         v-for="toast in toasts" 
         :key="toast.id"
-        class="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-2xl flex items-start gap-3 transition-all duration-300 animate-slide-in"
+        class="glass-card p-4 rounded-xl border border-white/20 shadow-2xl flex items-start gap-3 transition-all duration-300"
         :class="{
-          'border-amber-500/40 bg-amber-950/20 text-amber-300': toast.type === 'warning',
-          'border-emerald-500/40 bg-emerald-950/20 text-emerald-300': toast.type === 'success',
-          'border-rose-500/40 bg-rose-950/20 text-rose-300': toast.type === 'error',
-          'border-indigo-500/40 bg-slate-900 text-indigo-300': toast.type === 'info',
+          'border-amber-500/40 bg-amber-950/30 text-amber-300': toast.type === 'warning',
+          'border-[#10b981]/40 bg-[#10b981]/10 text-[#4edea3]': toast.type === 'success',
+          'border-rose-500/40 bg-rose-950/30 text-rose-300': toast.type === 'error',
+          'border-indigo-500/40 bg-indigo-950/30 text-indigo-300': toast.type === 'info',
         }"
       >
-        <div class="text-lg">
+        <span class="text-lg">
           <span v-if="toast.type === 'warning'">📢</span>
           <span v-else-if="toast.type === 'success'">✅</span>
           <span v-else-if="toast.type === 'error'">🚨</span>
           <span v-else>ℹ️</span>
-        </div>
-        <div class="flex-1">
-          <p class="text-sm font-semibold">{{ toast.message }}</p>
-        </div>
+        </span>
+        <p class="text-xs font-mono font-semibold leading-relaxed flex-1">{{ toast.message }}</p>
       </div>
     </div>
   </div>
 </template>
 
 <style>
-/* Custom toast entry animation */
-@keyframes slideIn {
-  from {
-    transform: translateY(20px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+/* Stitch Custom Glassmorphic Styles */
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: border-color 0.3s ease;
 }
-.animate-slide-in {
-  animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+.glass-card:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.glow-emerald {
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.12);
+}
+.glow-rose {
+  box-shadow: 0 0 30px rgba(244, 63, 94, 0.12);
+}
+.glow-amber {
+  box-shadow: 0 0 30px rgba(245, 158, 11, 0.12);
+}
+.glow-indigo {
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.12);
 }
 </style>

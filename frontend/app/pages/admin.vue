@@ -14,7 +14,7 @@ const isAuthenticating = ref(false)
 const adminMachines = ref([])
 const smartPlugs = ref([])
 const usageStats = ref(null)
-const machinesList = ref([]) // Basic list of machines for dropdown binding
+const machinesList = ref([])
 const loading = ref(false)
 const errorMsg = ref('')
 
@@ -58,7 +58,6 @@ const verifyPin = async () => {
 
     if (res.valid) {
       isAuthenticated.value = true
-      // Store PIN in session memory for API headers
       sessionStorage.setItem('admin_pin', inputPin.value)
       addToast('Admin authenticated successfully!', 'success')
       fetchAdminData()
@@ -70,7 +69,6 @@ const verifyPin = async () => {
   }
 }
 
-// Check session storage on mount
 onMounted(() => {
   const savedPin = sessionStorage.getItem('admin_pin')
   if (savedPin) {
@@ -79,7 +77,7 @@ onMounted(() => {
   }
 })
 
-// Fetch all Admin Data (Machines with Identities, Smart Plugs, Stats)
+// Fetch all Admin Data
 const fetchAdminData = async () => {
   if (!isAuthenticated.value) return
   loading.value = true
@@ -181,10 +179,7 @@ const deleteSmartPlug = async (plugId) => {
   const headers = { 'X-Admin-PIN': inputPin.value }
 
   try {
-    await $fetch(`${apiBase}/api/smart-plugs/${plugId}`, {
-      method: 'DELETE',
-      headers
-    })
+    await $fetch(`${apiBase}/api/smart-plugs/${plugId}`, { method: 'DELETE', headers })
     addToast('Smart plug removed.', 'success')
     fetchAdminData()
   } catch (err) {
@@ -204,7 +199,7 @@ const testPlugConnection = async (plugId) => {
     if (res.is_online) {
       addToast(`🟢 Local Plug Online! Power: ${res.power_w ?? 0}W, Voltage: ${res.voltage_v ?? 0}V`, 'success')
     } else {
-      addToast(`🔴 Plug Offline or Unreachable. Check IP & Local Key. Detail: ${res.detail || 'Timeout'}`, 'error')
+      addToast(`🔴 Plug Offline or Unreachable. Check IP & Local Key.`, 'error')
     }
     fetchAdminData()
   } catch (err) {
@@ -216,46 +211,44 @@ const testPlugConnection = async (plugId) => {
 </script>
 
 <template>
-  <div class="relative min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans pb-12 selection:bg-indigo-500 selection:text-white">
-    <!-- Radiant Gradients -->
-    <div class="absolute top-[-10%] left-[-20%] w-[60vw] h-[60vw] rounded-full bg-violet-900/10 blur-[120px] pointer-events-none"></div>
-
-    <!-- Header Navigation -->
-    <header class="border-b border-slate-900 bg-slate-900/60 backdrop-blur-md sticky top-0 z-30 px-6 py-4">
+  <div class="stitch-app min-h-screen bg-[#090D16] text-[#dfe2ef] selection:bg-[#10b981] selection:text-black">
+    <!-- Top Header Navigation -->
+    <header class="bg-[#090D16]/80 backdrop-blur-xl border-b border-white/10 sticky top-0 w-full z-50 px-6 py-4">
       <div class="max-w-7xl mx-auto flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <NuxtLink to="/" class="bg-indigo-600 hover:bg-indigo-500 p-2 rounded-xl text-xl shadow-lg shadow-indigo-600/30 transition">
-            ⬅️
+          <NuxtLink to="/" class="glass-card px-3 py-2 rounded-xl text-xs font-mono font-bold text-white hover:text-[#4edea3] transition">
+            ← Dashboard
           </NuxtLink>
           <div>
-            <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              WashQueue Admin <span class="text-xs bg-violet-500/20 text-violet-400 px-2.5 py-0.5 rounded-full font-mono font-bold border border-violet-500/30">Protected</span>
+            <h1 class="text-xl font-bold font-mono tracking-tight text-white flex items-center gap-2">
+              ADMIN PORTAL // SECURE_NODE
+              <span v-if="isAuthenticated" class="text-xs bg-[#10b981]/20 text-[#4edea3] px-2.5 py-0.5 rounded-full font-mono font-bold border border-[#10b981]/30">
+                Admin Authenticated (PIN: 1234)
+              </span>
             </h1>
-            <p class="text-xs text-slate-400">Live User Identity Tracking & Local Smart Plug Manager</p>
+            <p class="text-xs text-[#86948a] font-mono">User Identity Resolver & Local Wipro Smart Plug Telemetry</p>
           </div>
         </div>
 
         <div v-if="isAuthenticated" class="flex items-center gap-3">
-          <button @click="fetchAdminData" class="bg-slate-900 hover:bg-slate-800 border border-slate-800 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
-            🔄 Refresh Data
+          <button @click="fetchAdminData" class="glass-card px-3 py-1.5 rounded-xl text-xs font-mono font-semibold hover:border-[#10b981]/40 transition">
+            🔄 Refresh
           </button>
-          <button @click="isAuthenticated = false; sessionStorage.removeItem('admin_pin')" class="bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 px-3 py-1.5 rounded-xl text-xs font-semibold transition">
+          <button @click="isAuthenticated = false; sessionStorage.removeItem('admin_pin')" class="bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition">
             🔒 Lock Admin
           </button>
         </div>
       </div>
     </header>
 
-    <!-- PIN Authentication Overlay Modal -->
-    <div v-if="!isAuthenticated" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-lg flex items-center justify-center p-4">
-      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-md w-full shadow-2xl text-center relative overflow-hidden">
-        <div class="absolute -top-12 -right-12 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl"></div>
-
-        <div class="w-16 h-16 bg-violet-600/20 border border-violet-500/30 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">
+    <!-- PIN Unlock Modal -->
+    <div v-if="!isAuthenticated" class="fixed inset-0 z-50 bg-[#090D16]/90 backdrop-blur-xl flex items-center justify-center p-4">
+      <div class="glass-card rounded-3xl p-8 max-w-md w-full text-center relative overflow-hidden glow-indigo">
+        <div class="w-16 h-16 bg-[#10b981]/10 border border-[#10b981]/30 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">
           🔐
         </div>
-        <h2 class="text-2xl font-bold text-white mb-2">WashQueue Admin Security</h2>
-        <p class="text-xs text-slate-400 mb-6">Enter the 4-digit Admin PIN to view live machine user identities and configure local smart plugs.</p>
+        <h2 class="text-xl font-mono font-bold text-white mb-2">SECURITY_AUTHENTICATION</h2>
+        <p class="text-xs font-mono text-[#86948a] mb-6">Enter Admin PIN to inspect student identities and local smart plug configurations.</p>
 
         <form @submit.prevent="verifyPin" class="space-y-4">
           <input 
@@ -263,57 +256,56 @@ const testPlugConnection = async (plugId) => {
             type="password"
             maxlength="8"
             placeholder="Enter Admin PIN (Default: 1234)"
-            class="w-full bg-slate-950 border border-slate-800 text-center font-mono text-xl tracking-widest text-white rounded-xl py-3 focus:outline-none focus:border-indigo-500 transition"
+            class="w-full bg-[#0a0e17] border border-white/10 text-center font-mono text-xl tracking-widest text-white rounded-xl py-3 focus:outline-none focus:border-[#10b981] transition"
           />
 
-          <p v-if="pinError" class="text-xs font-semibold text-rose-400 bg-rose-950/30 border border-rose-500/30 py-2 rounded-lg">
+          <p v-if="pinError" class="text-xs font-mono font-semibold text-rose-400 bg-rose-950/30 border border-rose-500/30 py-2 rounded-lg">
             {{ pinError }}
           </p>
 
           <button 
             type="submit" 
             :disabled="isAuthenticating || !inputPin"
-            class="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-600/30"
+            class="w-full bg-[#10b981] hover:bg-[#4edea3] disabled:opacity-50 text-[#003824] font-mono font-bold py-3 rounded-xl uppercase tracking-wider transition shadow-lg"
           >
-            <span v-if="isAuthenticating">Authenticating...</span>
-            <span v-else>Unlock Admin Portal 🔓</span>
+            <span v-if="isAuthenticating">VERIFYING...</span>
+            <span v-else>UNLOCK ADMIN CONSOLE 🔓</span>
           </button>
         </form>
       </div>
     </div>
 
     <!-- Authenticated Admin Content -->
-    <main v-else class="max-w-7xl mx-auto px-6 mt-8 flex-1 w-full space-y-8">
+    <main v-else class="max-w-7xl mx-auto px-6 pt-8 pb-16 space-y-8">
       
       <!-- Headline Stats Cards -->
-      <div v-if="usageStats" class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div class="bg-slate-900/50 border border-slate-900 rounded-2xl p-5">
-          <p class="text-xs text-slate-400 font-medium">Total Machines</p>
-          <p class="text-3xl font-black text-white mt-1">{{ usageStats.total_machines }}</p>
+      <div v-if="usageStats" class="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <div class="glass-card rounded-2xl p-5">
+          <p class="text-xs font-mono text-[#86948a] uppercase">Total Machines</p>
+          <p class="text-3xl font-mono font-bold text-white mt-1">{{ usageStats.total_machines }}</p>
         </div>
-        <div class="bg-slate-900/50 border border-slate-900 rounded-2xl p-5">
-          <p class="text-xs text-slate-400 font-medium">Online Smart Plugs</p>
-          <p class="text-3xl font-black text-emerald-400 mt-1">{{ usageStats.online_plugs }} / {{ smartPlugs.length }}</p>
+        <div class="glass-card rounded-2xl p-5 glow-emerald">
+          <p class="text-xs font-mono text-[#86948a] uppercase">Online Smart Plugs</p>
+          <p class="text-3xl font-mono font-bold text-[#4edea3] mt-1">{{ usageStats.online_plugs }} / {{ smartPlugs.length }}</p>
         </div>
-        <div class="bg-slate-900/50 border border-slate-900 rounded-2xl p-5">
-          <p class="text-xs text-slate-400 font-medium">Currently In Use</p>
-          <p class="text-3xl font-black text-rose-400 mt-1">{{ usageStats.status_breakdown.in_use }}</p>
+        <div class="glass-card rounded-2xl p-5 glow-rose">
+          <p class="text-xs font-mono text-[#86948a] uppercase">Currently In Use</p>
+          <p class="text-3xl font-mono font-bold text-[#ffb2b7] mt-1">{{ usageStats.status_breakdown.in_use }}</p>
         </div>
-        <div class="bg-slate-900/50 border border-slate-900 rounded-2xl p-5">
-          <p class="text-xs text-slate-400 font-medium">Idle & Full (Unloaded)</p>
-          <p class="text-3xl font-black text-amber-400 mt-1">{{ usageStats.status_breakdown.idle_full }}</p>
+        <div class="glass-card rounded-2xl p-5 glow-amber">
+          <p class="text-xs font-mono text-[#86948a] uppercase">Idle Full (Unloaded)</p>
+          <p class="text-3xl font-mono font-bold text-[#fbbf24] mt-1">{{ usageStats.status_breakdown.idle_full }}</p>
         </div>
       </div>
 
-      <!-- SECTION 1: Who Is Using What (Live Machine User Identity View) -->
+      <!-- SECTION 1: Student Identity Resolver Table (USER_RESOLVER_V1) -->
       <section class="space-y-4">
         <div class="flex items-center justify-between">
           <div>
-            <h2 class="text-lg font-bold text-white flex items-center gap-2">
-              <span>👤 Live Machine User Identities</span>
-              <span class="text-xs bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded font-mono">Admin Only</span>
+            <h2 class="text-lg font-mono font-bold text-white flex items-center gap-2">
+              <span>USER_RESOLVER_V1 // LIVE_STUDENT_IDENTITIES</span>
             </h2>
-            <p class="text-xs text-slate-400">Unmasked student names and contact details for active laundry bookings.</p>
+            <p class="text-xs font-mono text-[#86948a]">Unmasked student identities and active laundry booking metrics.</p>
           </div>
         </div>
 
@@ -321,92 +313,92 @@ const testPlugConnection = async (plugId) => {
           <div 
             v-for="machine in adminMachines" 
             :key="machine.id"
-            class="bg-slate-900/60 border border-slate-900 rounded-2xl p-5 flex flex-col justify-between"
+            class="glass-card rounded-2xl p-5 flex flex-col justify-between"
           >
             <div>
               <div class="flex items-center justify-between mb-3">
-                <span class="text-slate-200 text-sm font-bold">{{ machine.name }}</span>
+                <span class="text-white font-mono font-bold text-sm">{{ machine.name }}</span>
                 <span 
-                  class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+                  class="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-full border"
                   :class="{
-                    'bg-emerald-500/20 text-emerald-400': machine.status === 'available',
-                    'bg-rose-500/20 text-rose-400': machine.status === 'in_use',
-                    'bg-amber-500/20 text-amber-400': machine.status === 'idle_full'
+                    'bg-[#10b981]/20 text-[#4edea3] border-[#10b981]/30': machine.status === 'available',
+                    'bg-rose-500/20 text-rose-400 border-rose-500/30': machine.status === 'in_use',
+                    'bg-amber-500/20 text-amber-400 border-amber-500/30': machine.status === 'idle_full'
                   }"
                 >
                   {{ machine.status }}
                 </span>
               </div>
 
-              <!-- Active Booking Holder Identity -->
-              <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 my-3">
-                <p class="text-[11px] text-slate-400 uppercase font-mono font-semibold">Active User</p>
+              <!-- Active User Identity -->
+              <div class="bg-[#0a0e17] border border-white/10 rounded-xl p-3 my-3">
+                <p class="text-[10px] font-mono text-[#86948a] uppercase">Active Student</p>
                 <div v-if="machine.active_booking" class="mt-1">
-                  <p class="text-sm font-bold text-indigo-300 flex items-center gap-1.5">
-                    <span>🧑‍🎓</span> {{ machine.active_booking.user_name }}
+                  <p class="text-sm font-mono font-bold text-[#c0c1ff] flex items-center gap-1.5">
+                    🧑‍🎓 {{ machine.active_booking.user_name }}
                   </p>
-                  <p v-if="machine.active_booking.user_email" class="text-xs text-slate-400 truncate">
+                  <p v-if="machine.active_booking.user_email" class="text-xs font-mono text-[#86948a] truncate">
                     ✉️ {{ machine.active_booking.user_email }}
                   </p>
-                  <p class="text-[10px] text-slate-500 mt-1 font-mono">
+                  <p class="text-[10px] font-mono text-[#86948a] mt-1">
                     Started: {{ new Date(machine.active_booking.started_at).toLocaleTimeString() }}
                   </p>
                 </div>
-                <p v-else class="text-xs text-slate-500 italic mt-1">No active user (Available)</p>
+                <p v-else class="text-xs font-mono text-[#86948a]/60 italic mt-1">No active user (Available)</p>
               </div>
 
-              <!-- Live Telemetry Snapshot -->
-              <div v-if="machine.latest_telemetry" class="grid grid-cols-3 gap-2 text-center my-3 bg-slate-950/40 p-2 rounded-xl border border-slate-900">
+              <!-- Telemetry Metrics Snapshot -->
+              <div v-if="machine.latest_telemetry" class="grid grid-cols-3 gap-2 text-center my-3 bg-[#181b25] p-2 rounded-xl border border-white/10">
                 <div>
-                  <p class="text-[9px] text-slate-400 font-mono">VOLTAGE</p>
-                  <p class="text-xs font-bold text-amber-400">{{ machine.latest_telemetry.voltage_v ?? 0 }}V</p>
+                  <p class="text-[9px] font-mono text-[#86948a]">VOLTS</p>
+                  <p class="text-xs font-mono font-bold text-amber-400">{{ machine.latest_telemetry.voltage_v ?? 0 }}V</p>
                 </div>
                 <div>
-                  <p class="text-[9px] text-slate-400 font-mono">POWER</p>
-                  <p class="text-xs font-bold text-rose-400">{{ machine.latest_telemetry.power_w ?? 0 }}W</p>
+                  <p class="text-[9px] font-mono text-[#86948a]">POWER</p>
+                  <p class="text-xs font-mono font-bold text-rose-400">{{ machine.latest_telemetry.power_w ?? 0 }}W</p>
                 </div>
                 <div>
-                  <p class="text-[9px] text-slate-400 font-mono">CURRENT</p>
-                  <p class="text-xs font-bold text-sky-400">{{ machine.latest_telemetry.current_ma ?? 0 }}mA</p>
+                  <p class="text-[9px] font-mono text-[#86948a]">CURRENT</p>
+                  <p class="text-xs font-mono font-bold text-sky-400">{{ machine.latest_telemetry.current_ma ?? 0 }}mA</p>
                 </div>
               </div>
 
               <!-- Queue Identities -->
-              <div class="border-t border-slate-900 pt-3 mt-2">
-                <p class="text-[11px] text-slate-400 font-medium mb-1.5">Waitlist Queue ({{ machine.queue.length }})</p>
-                <div v-if="machine.queue.length > 0" class="space-y-1 max-h-20 overflow-y-auto">
-                  <div v-for="q in machine.queue" :key="q.id" class="text-xs bg-slate-950 px-2 py-1 rounded border border-slate-900 flex items-center justify-between">
-                    <span class="font-medium text-slate-300">#{{ q.position }} {{ q.user_name }}</span>
-                    <span class="text-[10px] text-slate-500">{{ q.status }}</span>
+              <div class="border-t border-white/10 pt-3 mt-2">
+                <p class="text-[11px] font-mono text-[#86948a] mb-1.5">Waitlist Queue ({{ machine.queue.length }})</p>
+                <div v-if="machine.queue.length > 0" class="space-y-1 max-h-20 overflow-y-auto pr-1">
+                  <div v-for="q in machine.queue" :key="q.id" class="text-xs font-mono bg-[#0a0e17] px-2 py-1 rounded border border-white/10 flex items-center justify-between">
+                    <span class="text-[#dfe2ef]">#{{ q.position }} {{ q.user_name }}</span>
+                    <span class="text-[10px] text-[#86948a] uppercase">{{ q.status }}</span>
                   </div>
                 </div>
-                <p v-else class="text-[11px] text-slate-500 italic">Queue is empty</p>
+                <p v-else class="text-[11px] font-mono text-[#86948a]/60 italic">Queue is empty</p>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- SECTION 2: Local Smart Plug Configuration Manager -->
-      <section class="space-y-4 pt-4 border-t border-slate-900">
+      <!-- SECTION 2: Smart Plug Manager (IOT_TELEMETRY // WIPRO_SMART_PLUG) -->
+      <section class="space-y-4 pt-6 border-t border-white/10">
         <div class="flex items-center justify-between">
           <div>
-            <h2 class="text-lg font-bold text-white flex items-center gap-2">
-              <span>⚡ Local Smart Plug Configurations (Wipro / Tuya LAN)</span>
+            <h2 class="text-lg font-mono font-bold text-white">
+              IOT_TELEMETRY // WIPRO_SMART_PLUG
             </h2>
-            <p class="text-xs text-slate-400">Configure device IP, Local Key, and power thresholds for local socket telemetry polling.</p>
+            <p class="text-xs font-mono text-[#86948a]">Configure device IP, Local Key, and power thresholds for local socket telemetry polling.</p>
           </div>
           <button 
             @click="openAddPlugModal"
-            class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/30"
+            class="bg-[#10b981] hover:bg-[#4edea3] text-[#003824] font-mono font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 uppercase tracking-wider"
           >
             ➕ Register Smart Plug
           </button>
         </div>
 
-        <div class="bg-slate-900/40 border border-slate-900 rounded-2xl overflow-hidden">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-slate-900/80 text-slate-400 uppercase font-mono border-b border-slate-800">
+        <div class="glass-card rounded-2xl overflow-hidden">
+          <table class="w-full text-left text-xs font-mono">
+            <thead class="bg-[#181b25] text-[#86948a] uppercase border-b border-white/10">
               <tr>
                 <th class="p-4">Assigned Machine</th>
                 <th class="p-4">Status</th>
@@ -416,49 +408,49 @@ const testPlugConnection = async (plugId) => {
                 <th class="p-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-900">
-              <tr v-for="plug in smartPlugs" :key="plug.id" class="hover:bg-slate-900/30 transition">
-                <td class="p-4 font-bold text-slate-200">
+            <tbody class="divide-y divide-white/10">
+              <tr v-for="plug in smartPlugs" :key="plug.id" class="hover:bg-white/5 transition">
+                <td class="p-4 font-bold text-white">
                   {{ machinesList.find(m => m.id === plug.machine_id)?.name || 'Unassigned' }}
                 </td>
                 <td class="p-4">
                   <span 
-                    class="px-2 py-0.5 rounded text-[10px] font-bold uppercase"
-                    :class="plug.is_online ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'"
+                    class="px-2 py-0.5 rounded text-[10px] font-bold uppercase border"
+                    :class="plug.is_online ? 'bg-[#10b981]/20 text-[#4edea3] border-[#10b981]/30' : 'bg-rose-500/20 text-rose-400 border-rose-500/30'"
                   >
                     {{ plug.is_online ? 'Online' : 'Offline' }}
                   </span>
                 </td>
-                <td class="p-4 font-mono text-slate-300">{{ plug.ip_address }}</td>
-                <td class="p-4 font-mono text-slate-400 truncate max-w-[120px]">{{ plug.device_id }}</td>
-                <td class="p-4 font-mono text-slate-400">
+                <td class="p-4 text-[#dfe2ef]">{{ plug.ip_address }}</td>
+                <td class="p-4 text-[#86948a] truncate max-w-[120px]">{{ plug.device_id }}</td>
+                <td class="p-4 text-[#86948a]">
                   Run: {{ plug.power_threshold_running }}W | Idle: {{ plug.power_threshold_idle }}W
                 </td>
                 <td class="p-4 text-right space-x-2">
                   <button 
                     @click="testPlugConnection(plug.id)"
                     :disabled="testingPlugId === plug.id"
-                    class="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-2.5 py-1 rounded text-[11px] font-semibold transition"
+                    class="bg-[#181b25] hover:bg-[#262a34] text-[#4edea3] px-3 py-1 rounded-lg text-[11px] font-bold border border-white/10 transition"
                   >
                     {{ testingPlugId === plug.id ? 'Testing...' : '📡 Test LAN' }}
                   </button>
                   <button 
                     @click="openEditPlugModal(plug)"
-                    class="bg-slate-800 hover:bg-slate-700 text-indigo-300 px-2.5 py-1 rounded text-[11px] font-semibold transition"
+                    class="bg-[#181b25] hover:bg-[#262a34] text-indigo-300 px-3 py-1 rounded-lg text-[11px] font-bold border border-white/10 transition"
                   >
                     ✏️ Edit
                   </button>
                   <button 
                     @click="deleteSmartPlug(plug.id)"
-                    class="bg-rose-950/40 hover:bg-rose-900/40 text-rose-400 px-2.5 py-1 rounded text-[11px] font-semibold transition"
+                    class="bg-rose-950/40 hover:bg-rose-900/40 text-rose-400 px-3 py-1 rounded-lg text-[11px] font-bold border border-rose-500/30 transition"
                   >
                     🗑️
                   </button>
                 </td>
               </tr>
               <tr v-if="smartPlugs.length === 0">
-                <td colspan="6" class="p-8 text-center text-slate-500 italic">
-                  No smart plugs registered yet. Click "Register Smart Plug" to add your local Wipro plug.
+                <td colspan="6" class="p-8 text-center text-[#86948a] italic">
+                  No smart plugs registered yet. Click "Register Smart Plug" to pair your local Wipro plug.
                 </td>
               </tr>
             </tbody>
@@ -467,33 +459,33 @@ const testPlugConnection = async (plugId) => {
       </section>
     </main>
 
-    <!-- Register / Edit Smart Plug Modal -->
-    <div v-if="isModalOpen" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4">
-        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-          <h3 class="text-base font-bold text-white">
-            {{ editingPlugId ? 'Edit Smart Plug Config' : 'Register Wipro Smart Plug (Local LAN)' }}
+    <!-- Modal Form for Registering/Editing Plugs -->
+    <div v-if="isModalOpen" class="fixed inset-0 z-50 bg-[#090D16]/90 backdrop-blur-xl flex items-center justify-center p-4">
+      <div class="glass-card rounded-3xl p-6 max-w-lg w-full space-y-4 glow-emerald">
+        <div class="flex items-center justify-between border-b border-white/10 pb-3">
+          <h3 class="text-sm font-mono font-bold text-white uppercase">
+            {{ editingPlugId ? 'EDIT_SMART_PLUG_CONFIG' : 'REGISTER_WIPRO_SMART_PLUG' }}
           </h3>
-          <button @click="isModalOpen = false" class="text-slate-400 hover:text-white">✕</button>
+          <button @click="isModalOpen = false" class="text-[#86948a] hover:text-white font-mono">✕</button>
         </div>
 
-        <form @submit.prevent="saveSmartPlug" class="space-y-3 text-xs">
+        <form @submit.prevent="saveSmartPlug" class="space-y-3 font-mono text-xs">
           <div>
-            <label class="block text-slate-400 font-medium mb-1">Assign to Machine</label>
-            <select v-model="plugForm.machine_id" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:outline-none focus:border-indigo-500">
-              <option value="">-- Select Washing Machine --</option>
+            <label class="block text-[#86948a] font-medium mb-1">Assign to Machine</label>
+            <select v-model="plugForm.machine_id" class="w-full bg-[#0a0e17] border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-[#10b981]">
+              <option value="">-- Select Machine --</option>
               <option v-for="m in machinesList" :key="m.id" :value="m.id">{{ m.name }}</option>
             </select>
           </div>
 
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-slate-400 font-medium mb-1">IP Address (Local LAN)</label>
-              <input v-model="plugForm.ip_address" required placeholder="192.168.1.50" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-mono focus:outline-none focus:border-indigo-500" />
+              <label class="block text-[#86948a] font-medium mb-1">IP Address (Local LAN)</label>
+              <input v-model="plugForm.ip_address" required placeholder="192.168.1.50" class="w-full bg-[#0a0e17] border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-[#10b981]" />
             </div>
             <div>
-              <label class="block text-slate-400 font-medium mb-1">Protocol Version</label>
-              <select v-model="plugForm.protocol_version" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:outline-none focus:border-indigo-500 font-mono">
+              <label class="block text-[#86948a] font-medium mb-1">Protocol Version</label>
+              <select v-model="plugForm.protocol_version" class="w-full bg-[#0a0e17] border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-[#10b981]">
                 <option value="3.3">3.3 (Standard Wipro)</option>
                 <option value="3.1">3.1 (Older)</option>
                 <option value="3.4">3.4 (Newer Tuya)</option>
@@ -502,52 +494,61 @@ const testPlugConnection = async (plugId) => {
           </div>
 
           <div>
-            <label class="block text-slate-400 font-medium mb-1">Tuya Device ID</label>
-            <input v-model="plugForm.device_id" required placeholder="bf1234567890abcdef" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-mono focus:outline-none focus:border-indigo-500" />
+            <label class="block text-[#86948a] font-medium mb-1">Tuya Device ID</label>
+            <input v-model="plugForm.device_id" required placeholder="bf1234567890abcdef" class="w-full bg-[#0a0e17] border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-[#10b981]" />
           </div>
 
           <div>
-            <label class="block text-slate-400 font-medium mb-1">Tuya Local Key</label>
-            <input v-model="plugForm.local_key" required type="text" placeholder="16-character local key" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-mono focus:outline-none focus:border-indigo-500" />
+            <label class="block text-[#86948a] font-medium mb-1">Tuya Local Key</label>
+            <input v-model="plugForm.local_key" required type="text" placeholder="16-character local key" class="w-full bg-[#0a0e17] border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-[#10b981]" />
           </div>
 
           <div class="grid grid-cols-3 gap-2">
             <div>
-              <label class="block text-slate-400 font-medium mb-1">Run Threshold (W)</label>
-              <input v-model.number="plugForm.power_threshold_running" type="number" step="0.1" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-mono focus:outline-none focus:border-indigo-500" />
+              <label class="block text-[#86948a] font-medium mb-1">Run (W)</label>
+              <input v-model.number="plugForm.power_threshold_running" type="number" step="0.1" class="w-full bg-[#0a0e17] border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-[#10b981]" />
             </div>
             <div>
-              <label class="block text-slate-400 font-medium mb-1">Idle Threshold (W)</label>
-              <input v-model.number="plugForm.power_threshold_idle" type="number" step="0.1" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-mono focus:outline-none focus:border-indigo-500" />
+              <label class="block text-[#86948a] font-medium mb-1">Idle (W)</label>
+              <input v-model.number="plugForm.power_threshold_idle" type="number" step="0.1" class="w-full bg-[#0a0e17] border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-[#10b981]" />
             </div>
             <div>
-              <label class="block text-slate-400 font-medium mb-1">Soak Debounce (s)</label>
-              <input v-model.number="plugForm.debounce_seconds" type="number" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-mono focus:outline-none focus:border-indigo-500" />
+              <label class="block text-[#86948a] font-medium mb-1">Soak (s)</label>
+              <input v-model.number="plugForm.debounce_seconds" type="number" class="w-full bg-[#0a0e17] border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-[#10b981]" />
             </div>
           </div>
 
-          <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
-            <button type="button" @click="isModalOpen = false" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold">Cancel</button>
-            <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold">Save Plug</button>
+          <div class="flex justify-end gap-2 pt-3 border-t border-white/10">
+            <button type="button" @click="isModalOpen = false" class="px-4 py-2 bg-[#181b25] hover:bg-[#262a34] text-white rounded-xl font-bold">Cancel</button>
+            <button type="submit" class="px-4 py-2 bg-[#10b981] hover:bg-[#4edea3] text-[#003824] rounded-xl font-bold uppercase">Save Plug</button>
           </div>
         </form>
       </div>
     </div>
-
-    <!-- Toast Floating Container -->
-    <div class="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full">
-      <div 
-        v-for="toast in toasts" 
-        :key="toast.id"
-        class="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-2xl flex items-start gap-3"
-        :class="{
-          'border-emerald-500/40 text-emerald-300': toast.type === 'success',
-          'border-rose-500/40 text-rose-300': toast.type === 'error',
-          'border-indigo-500/40 text-indigo-300': toast.type === 'info',
-        }"
-      >
-        <p class="text-xs font-bold flex-1">{{ toast.message }}</p>
-      </div>
-    </div>
   </div>
 </template>
+
+<style>
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: border-color 0.3s ease;
+}
+.glass-card:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.glow-emerald {
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.12);
+}
+.glow-rose {
+  box-shadow: 0 0 30px rgba(244, 63, 94, 0.12);
+}
+.glow-amber {
+  box-shadow: 0 0 30px rgba(245, 158, 11, 0.12);
+}
+.glow-indigo {
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.12);
+}
+</style>
