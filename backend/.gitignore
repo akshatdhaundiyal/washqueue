@@ -1,0 +1,9 @@
+# Environment files
+.env
+*.env
+
+# Python & uv virtual environments
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/

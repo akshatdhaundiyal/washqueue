@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # 1. Local Database (PostgreSQL) - optional for multi-db testing
+  db:
+    image: postgres:15-alpine
+    container_name: washqueue-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: laundry
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # 2. FastAPI Backend Engine (Hot-Reload Enabled)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: washqueue-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - ADMIN_PIN=${ADMIN_PIN:-1234}
+      - TELEMETRY_POLL_INTERVAL=${TELEMETRY_POLL_INTERVAL:-10}
+      - WATCHFILES_FORCE_POLLING=true
+    volumes:
+      - ./backend:/app
+      - /app/.venv
+    command: uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+  # 3. Nuxt 3 Frontend Dashboard (Hot-Reload Enabled)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: washqueue-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - API_BASE_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.nuxt
+    command: npm run dev -- --host 0.0.0.0 --port 3000
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
