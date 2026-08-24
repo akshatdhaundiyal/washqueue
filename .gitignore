@@ -1,8 +1,19 @@
-# Environment files
+# Environment files & Secrets
 .env
 .env.*
 !.env.example
 *.env
+*.pem
+*.key
+*.cert
+*.crt
+
+# Tuya & TinyTuya generated configuration & credentials
+devices.json
+tinytuya.json
+tuya-raw.json
+snapshot.json
+tinytuya.log
 
 # Python & uv virtual environments
 .venv/
@@ -14,17 +25,34 @@ __pycache__/
 *$py.class
 .uv/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Databases & SQLite
 *.sqlite
+*.sqlite3
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 
 # Nuxt 3 & Node build outputs
+.output/
+.data/
+.nuxt/
+.nitro/
+.cache/
+dist/
+node_modules/
 frontend/.nuxt/
 frontend/.output/
 frontend/.nitro/
 frontend/.cache/
 frontend/dist/
-node_modules/
 frontend/node_modules/
+frontend/.data/
 
 # Logs & Runtime data
 logs/
@@ -32,6 +60,7 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # OS & IDE metadata
 .DS_Store

@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "tinytuya>=1.13.0",
     "aiosqlite>=0.20.0",
+    "tuya-connector-python>=0.1.2",
 ]
 
 [tool.hatch.build.targets.wheel]
