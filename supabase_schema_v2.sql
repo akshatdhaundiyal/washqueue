@@ -1,12 +1,15 @@
 -- PostgreSQL Migration Schema v2 for WashQueue Hostel Laundry Management Application
 -- Target: Supabase (PostgreSQL)
 
--- 1. Create smart_plugs table (Local LAN configuration)
+-- 1. Create smart_plugs table (Hardened Local LAN & Cloud configuration)
 CREATE TABLE IF NOT EXISTS smart_plugs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    machine_id UUID REFERENCES machines(id) ON DELETE SET NULL,
+    machine_id UUID UNIQUE REFERENCES machines(id) ON DELETE SET NULL,
+    name TEXT,
+    mac_address TEXT,
+    outlet_index INT NOT NULL DEFAULT 1,
     provider TEXT NOT NULL DEFAULT 'tuya_local',
-    device_id TEXT NOT NULL UNIQUE,
+    device_id TEXT NOT NULL,
     local_key TEXT NOT NULL,
     ip_address TEXT NOT NULL,
     protocol_version TEXT NOT NULL DEFAULT '3.3',
@@ -15,8 +18,14 @@ CREATE TABLE IF NOT EXISTS smart_plugs (
     debounce_seconds INT NOT NULL DEFAULT 120,
     is_online BOOLEAN NOT NULL DEFAULT false,
     last_seen_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    consecutive_failures INT NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_smart_plugs_mac_outlet UNIQUE (mac_address, outlet_index)
 );
+
+CREATE INDEX IF NOT EXISTS ix_smart_plugs_device_id ON smart_plugs(device_id);
+CREATE INDEX IF NOT EXISTS ix_smart_plugs_mac ON smart_plugs(mac_address);
 
 -- 2. Create telemetry_readings table
 CREATE TABLE IF NOT EXISTS telemetry_readings (
@@ -29,6 +38,8 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     switch_on BOOLEAN,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS ix_telemetry_plug_recorded_at ON telemetry_readings (plug_id, recorded_at DESC);
 
 -- 3. Create users table with admin support
 CREATE TABLE IF NOT EXISTS users (

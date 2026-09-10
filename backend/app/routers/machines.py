@@ -2,27 +2,35 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from typing import List
+import datetime
+from sqlalchemy import select
 
 try:
     from app.database import get_db
     from app.schemas import (
         MachineResponse, BookingResponse, QueueResponse,
-        MachineDetailResponse, ClaimRequest, PingRequest, QueueJoinRequest
+        MachineDetailResponse, ClaimRequest, PingRequest, QueueJoinRequest,
+        TelemetryHistoryResponse, TelemetryHistoryPoint
     )
+    from app.models import TelemetryReading
     from app.repositories import (
         MachineRepository, BookingRepository, QueueRepository,
-        SmartPlugRepository, TelemetryRepository
+        SmartPlugRepository, TelemetryRepository, UserRepository
     )
+    from app.routers.websocket import ws_manager
 except ImportError:
-    from database import get_db
-    from schemas import (
+    from ..database import get_db
+    from ..schemas import (
         MachineResponse, BookingResponse, QueueResponse,
-        MachineDetailResponse, ClaimRequest, PingRequest, QueueJoinRequest
+        MachineDetailResponse, ClaimRequest, PingRequest, QueueJoinRequest,
+        TelemetryHistoryResponse, TelemetryHistoryPoint
     )
-    from repositories import (
+    from ..models import TelemetryReading
+    from ..repositories import (
         MachineRepository, BookingRepository, QueueRepository,
-        SmartPlugRepository, TelemetryRepository
+        SmartPlugRepository, TelemetryRepository, UserRepository
     )
+    from ..routers.websocket import ws_manager
 
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
@@ -169,35 +177,62 @@ async def clear_machine(id: UUID, db: AsyncSession = Depends(get_db)):
 @router.post("/{id}/ping")
 async def ping_machine_owner(id: UUID, req: PingRequest, db: AsyncSession = Depends(get_db)):
     """
-    Allows a queued user to trigger an anonymous alert to the user holding the active booking.
-    Only allowed when status is 'idle_full'.
-    Returns the target owner's user_id so client can broadcast the notification.
+    Allows a student or queued user to trigger targeted alerts:
+    - target='occupant': Notifies the machine occupant to collect clothes.
+    - target='admin': Alerts hostel admin operator console regarding unattended load.
+    - target='both': Dispatches dual notification.
     """
     machine = await MachineRepository.get_by_id(db, id)
     if not machine:
         raise HTTPException(status_code=404, detail="Machine not found")
         
-    if machine.status != "idle_full":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Pinging owner is only allowed when machine is idle_full"
-        )
-        
     active_booking = await BookingRepository.get_active_booking(db, id)
     if not active_booking:
         raise HTTPException(
             status_code=400,
-            detail="No active booking found for this machine to ping"
+            detail="No active booking found on this machine to ping."
         )
-        
-    # Log the ping (anonymous alert)
+
+    # Lookup resident holding the booking
+    owner_user = await UserRepository.get_by_id(db, active_booking.user_id)
+    owner_name = owner_user.name if owner_user else "Resident"
+    owner_room = owner_user.room_number if owner_user else "Unknown Room"
+
+    target = req.target.lower().strip() if req.target else "occupant"
+    notify_occupant = target in ["occupant", "both"]
+    notify_admin = target in ["admin", "both"]
+
+    nudge_msg = f"Clothes finished on {machine.name}! Please collect your laundry from the drum."
+    admin_alert_msg = f"Hostel Alert: Issue/Overdue reported for {machine.name} (Occupant: {owner_name}, Room {owner_room})."
+
+    import asyncio
+    asyncio.create_task(ws_manager.broadcast({
+        "type": "nudge_alert",
+        "machine_id": str(machine.id),
+        "machine_name": machine.name,
+        "owner_user_id": str(active_booking.user_id) if notify_occupant else None,
+        "owner_room": owner_room,
+        "target": target,
+        "message": nudge_msg if notify_occupant else admin_alert_msg,
+        "admin_message": admin_alert_msg if notify_admin else None,
+        "notify_admin": notify_admin
+    }))
+    
     import logging
     logger = logging.getLogger("laundry-api")
-    logger.info(f"User {req.user_id} sent a ping alert to owner {active_booking.user_id} of Machine {machine.name}")
+    logger.info(f"User {req.user_id or 'Anonymous'} sent ping ({target}) for {machine.name} (Owner: {owner_name}, Room {owner_room})")
     
+    if target == "admin":
+        msg = f"Hostel admin alerted regarding {machine.name} (Room {owner_room})."
+    elif target == "occupant":
+        msg = f"Nudge sent directly to machine occupant ({owner_room}) to collect clothes."
+    else:
+        msg = f"Alert sent to both resident ({owner_room}) and hostel admin."
+
     return {
         "status": "success",
-        "message": f"Owner of Machine '{machine.name}' has been pinged.",
+        "target": target,
+        "message": msg,
         "owner_user_id": str(active_booking.user_id),
         "machine_name": machine.name
     }
@@ -269,3 +304,77 @@ async def leave_queue(id: UUID, req: QueueJoinRequest, db: AsyncSession = Depend
         active_booking=booking_data,
         queue=[QueueResponse.model_validate(q) for q in updated_queue]
     )
+
+
+@router.get("/{id}/power-history", response_model=TelemetryHistoryResponse)
+async def get_machine_power_history(
+    id: UUID,
+    hours: int = 4,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Returns 4-hour historical power telemetry for this machine's linked smart plug.
+    Publicly accessible to residents tapping on machine cards to view cycle power curves.
+    """
+    machine = await MachineRepository.get_by_id(db, id)
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+        
+    plug = await SmartPlugRepository.get_by_machine_id(db, id)
+    if not plug:
+        return TelemetryHistoryResponse(
+            plug_id=machine.id,
+            plug_name=machine.name,
+            hours=hours,
+            peak_power_w=0.0,
+            avg_power_w=0.0,
+            local_points_count=0,
+            cloud_points_count=0,
+            series=[]
+        )
+        
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    result = await db.execute(
+        select(TelemetryReading)
+        .where(TelemetryReading.plug_id == plug.id)
+        .where(TelemetryReading.recorded_at >= cutoff)
+        .order_by(TelemetryReading.recorded_at.asc())
+    )
+    readings = result.scalars().all()
+    if not readings:
+        fallback_res = await db.execute(
+            select(TelemetryReading)
+            .where(TelemetryReading.plug_id == plug.id)
+            .order_by(TelemetryReading.recorded_at.desc())
+            .limit(150)
+        )
+        readings = list(reversed(fallback_res.scalars().all()))
+
+    powers = [r.power_w for r in readings if r.power_w is not None]
+    peak_w = max(powers) if powers else 0.0
+    avg_w = sum(powers) / len(powers) if powers else 0.0
+    local_count = sum(1 for r in readings if (getattr(r, "source", None) or "local") == "local")
+    cloud_count = sum(1 for r in readings if getattr(r, "source", None) == "cloud")
+
+    series = [
+        TelemetryHistoryPoint(
+            timestamp=r.recorded_at.isoformat() if r.recorded_at else "",
+            power_w=round(r.power_w or 0.0, 1),
+            voltage_v=round(r.voltage_v, 1) if r.voltage_v is not None else None,
+            current_ma=round(r.current_ma, 1) if r.current_ma is not None else None,
+            source=getattr(r, "source", None) or "local"
+        )
+        for r in readings
+    ]
+
+    return TelemetryHistoryResponse(
+        plug_id=plug.id,
+        plug_name=f"{machine.name} • {plug.name or 'Smart Plug'}",
+        hours=hours,
+        peak_power_w=round(peak_w, 1),
+        avg_power_w=round(avg_w, 1),
+        local_points_count=local_count,
+        cloud_points_count=cloud_count,
+        series=series
+    )
+

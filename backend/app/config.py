@@ -1,5 +1,8 @@
 from pydantic_settings import BaseSettings
 from pydantic import Field
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Settings(BaseSettings):
     # Default to local postgresql if not specified
@@ -16,6 +19,11 @@ class Settings(BaseSettings):
         alias="TELEMETRY_POLL_INTERVAL"
     )
 
+    cloud_database_url: str | None = Field(
+        default=None,
+        alias="CLOUD_DATABASE_URL"
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -26,6 +34,18 @@ class Settings(BaseSettings):
         url = self.database_url
         # Supabase and other providers use postgres:// or postgresql://.
         # SQLAlchemy asyncpg driver requires postgresql+asyncpg://
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+
+    @property
+    def async_cloud_database_url(self) -> str | None:
+        import os
+        url = os.getenv("CLOUD_DATABASE_URL") or os.getenv("SUPABASE_DATABASE_URL") or self.cloud_database_url
+        if not url:
+            return None
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):

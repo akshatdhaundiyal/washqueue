@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -15,14 +16,14 @@ try:
         UserRepository, SmartPlugRepository, TelemetryRepository
     )
 except ImportError:
-    from database import get_db
-    from middleware.auth import require_admin_pin
-    from config import settings
-    from schemas import (
+    from ..database import get_db
+    from ..middleware.auth import require_admin_pin
+    from ..config import settings
+    from ..schemas import (
         PinVerifyRequest, UserResponse, AdminMachineDetailResponse,
         AdminBookingResponse, AdminQueueResponse, SmartPlugResponse, TelemetryReadingResponse
     )
-    from repositories import (
+    from ..repositories import (
         MachineRepository, BookingRepository, QueueRepository,
         UserRepository, SmartPlugRepository, TelemetryRepository
     )
@@ -140,3 +141,68 @@ async def get_usage_stats(db: AsyncSession = Depends(get_db)):
             "idle_full": idle_full_count
         }
     }
+
+# ==========================================
+# Database Portal Endpoints (Local & Cloud)
+# ==========================================
+
+class DatabaseQueryRequest(BaseModel):
+    target: str = "local"
+    query: str
+
+@router.get("/database/status", dependencies=[Depends(require_admin_pin)])
+async def get_database_status(target: str = "local"):
+    """
+    Returns connection health and table listing with row counts
+    for the specified target ('local' or 'cloud').
+    """
+    try:
+        from app.database_portal_service import DatabasePortalService
+    except ImportError:
+        from ..database_portal_service import DatabasePortalService
+
+    return await DatabasePortalService.get_status(target)
+
+@router.get("/database/table-data", dependencies=[Depends(require_admin_pin)])
+async def get_database_table_data(
+    target: str = "local",
+    table_name: str = "machines",
+    limit: int = 50,
+    offset: int = 0
+):
+    """
+    Returns schema columns and paginated row records for a given table.
+    """
+    try:
+        from app.database_portal_service import DatabasePortalService
+    except ImportError:
+        from ..database_portal_service import DatabasePortalService
+
+    try:
+        return await DatabasePortalService.get_table_data(
+            target=target,
+            table_name=table_name,
+            limit=limit,
+            offset=offset
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/database/query", dependencies=[Depends(require_admin_pin)])
+async def execute_database_query(req: DatabaseQueryRequest):
+    """
+    Executes a read-only SQL query against either Local (SQLite) or Cloud (PostgreSQL).
+    """
+    try:
+        from app.database_portal_service import DatabasePortalService
+    except ImportError:
+        from ..database_portal_service import DatabasePortalService
+
+    try:
+        return await DatabasePortalService.execute_query(
+            target=req.target,
+            query_str=req.query
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+

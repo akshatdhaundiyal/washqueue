@@ -9,6 +9,7 @@ class TelemetryReadingData:
     power_w: Optional[float] = None
     energy_kwh: Optional[float] = None
     switch_on: Optional[bool] = None
+    source: str = "local"  # "local" | "cloud"
     raw_dps: Optional[Dict[str, Any]] = None
 
 @dataclass

@@ -41,7 +41,8 @@ class ClaimRequest(BaseModel):
     user_id: UUID
 
 class PingRequest(BaseModel):
-    user_id: UUID
+    user_id: Optional[UUID] = None
+    target: str = "occupant" # "occupant" | "admin" | "both"
 
 class QueueJoinRequest(BaseModel):
     user_id: UUID
@@ -49,17 +50,54 @@ class QueueJoinRequest(BaseModel):
 class PinVerifyRequest(BaseModel):
     pin: str
 
+class StudentRegisterRequest(BaseModel):
+    name: str
+    room_number: str
+    password: str
+    email: Optional[str] = None
+    university: Optional[str] = None
+    college: Optional[str] = None
+    hostel: Optional[str] = None
+
+class StudentLoginRequest(BaseModel):
+    room_number: str
+    password: str
+    name: Optional[str] = None
+
+class CalibrationUpdateRequest(BaseModel):
+    power_threshold_running: float
+    power_threshold_idle: float
+    debounce_seconds: int
+    apply_to_similar_machines: bool = False
+
+class CalibrationUpdateResponse(BaseModel):
+    plug_id: UUID
+    plug_name: Optional[str] = None
+    power_threshold_running: float
+    power_threshold_idle: float
+    debounce_seconds: int
+    similar_plugs_updated: int = 0
+    message: str
+
 # User DTOs
 class UserResponse(BaseModel):
     id: UUID
     name: str
+    room_number: Optional[str] = None
     email: Optional[str] = None
-    is_admin: bool
+    role: Optional[str] = "student"
+    is_admin: bool = False
+    university: Optional[str] = None
+    college: Optional[str] = None
+    hostel: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 # Smart Plug DTOs
 class SmartPlugBase(BaseModel):
+    name: Optional[str] = None
+    mac_address: Optional[str] = None
+    outlet_index: int = 1
     provider: str = "tuya_local"
     device_id: str
     local_key: str
@@ -73,6 +111,9 @@ class SmartPlugCreate(SmartPlugBase):
     machine_id: Optional[UUID] = None
 
 class SmartPlugUpdate(BaseModel):
+    name: Optional[str] = None
+    mac_address: Optional[str] = None
+    outlet_index: Optional[int] = None
     machine_id: Optional[UUID] = None
     provider: Optional[str] = None
     device_id: Optional[str] = None
@@ -83,14 +124,6 @@ class SmartPlugUpdate(BaseModel):
     power_threshold_idle: Optional[float] = None
     debounce_seconds: Optional[int] = None
 
-class SmartPlugResponse(SmartPlugBase):
-    id: UUID
-    machine_id: Optional[UUID] = None
-    is_online: bool = False
-    last_seen_at: Optional[datetime] = None
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
 # Telemetry DTOs
 class TelemetryReadingResponse(BaseModel):
     id: UUID
@@ -100,10 +133,39 @@ class TelemetryReadingResponse(BaseModel):
     power_w: Optional[float] = None
     energy_kwh: Optional[float] = None
     switch_on: Optional[bool] = None
+    source: Optional[str] = "local"
     recorded_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
-# Anonymized Student Machine Status Detail
+class TelemetryHistoryPoint(BaseModel):
+    timestamp: str
+    power_w: float = 0.0
+    voltage_v: Optional[float] = None
+    current_ma: Optional[float] = None
+    source: str = "local"  # "local" | "cloud"
+
+class TelemetryHistoryResponse(BaseModel):
+    plug_id: UUID
+    plug_name: Optional[str] = None
+    hours: int = 4
+    peak_power_w: float = 0.0
+    avg_power_w: float = 0.0
+    local_points_count: int = 0
+    cloud_points_count: int = 0
+    series: List[TelemetryHistoryPoint] = []
+
+class SmartPlugResponse(SmartPlugBase):
+    id: UUID
+    machine_id: Optional[UUID] = None
+    is_online: bool = False
+    last_seen_at: Optional[datetime] = None
+    consecutive_failures: int = 0
+    last_error: Optional[str] = None
+    created_at: datetime
+    latest_telemetry: Optional[TelemetryReadingResponse] = None
+    model_config = ConfigDict(from_attributes=True)
+
+# Anonymized Student Machine Status Detail (Protects user identity on public view)
 class MachineDetailResponse(BaseModel):
     id: UUID
     name: str
@@ -114,14 +176,16 @@ class MachineDetailResponse(BaseModel):
     is_plug_online: Optional[bool] = None
     model_config = ConfigDict(from_attributes=True)
 
-# Admin Detailed Machine Response (Exposes User Identity + Telemetry)
+# Admin Detailed Machine Response (Exposes User Identity + Room Number + Telemetry)
 class AdminBookingResponse(BookingResponse):
     user_name: str
     user_email: Optional[str] = None
+    room_number: Optional[str] = None
 
 class AdminQueueResponse(QueueResponse):
     user_name: str
     user_email: Optional[str] = None
+    room_number: Optional[str] = None
 
 class AdminMachineDetailResponse(BaseModel):
     id: UUID

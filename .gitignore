@@ -1,4 +1,10 @@
-# Environment files & Secrets
+# ==============================================================================
+# WashQueue Project .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Environment, Credentials & Secrets
+# ------------------------------------------------------------------------------
 .env
 .env.*
 !.env.example
@@ -7,15 +13,26 @@
 *.key
 *.cert
 *.crt
+*.pfx
+*.p12
 
-# Tuya & TinyTuya generated configuration & credentials
+# ------------------------------------------------------------------------------
+# Tuya & TinyTuya Device Configuration Dumps & Wizard Artifacts
+# ------------------------------------------------------------------------------
 devices.json
 tinytuya.json
 tuya-raw.json
 snapshot.json
 tinytuya.log
+**/devices.json
+**/tinytuya.json
+**/tuya-raw.json
+**/snapshot.json
+**/tinytuya.log
 
-# Python & uv virtual environments
+# ------------------------------------------------------------------------------
+# Python, Virtual Environments & uv
+# ------------------------------------------------------------------------------
 .venv/
 venv/
 ENV/
@@ -23,48 +40,121 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 .uv/
+.uv_cache/
+
+# ------------------------------------------------------------------------------
+# Testing, Coverage & Linters
+# ------------------------------------------------------------------------------
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
+.tox/
+.nox/
+.hypothesis/
 
-# Databases & SQLite
+# ------------------------------------------------------------------------------
+# Databases, SQLite & Local Storage
+# ------------------------------------------------------------------------------
 *.sqlite
 *.sqlite3
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+*.sql.bak
+washqueue.db
+backend/washqueue.db
 
-# Nuxt 3 & Node build outputs
-.output/
-.data/
-.nuxt/
-.nitro/
-.cache/
-dist/
+# ------------------------------------------------------------------------------
+# Nuxt 4, Vite, TypeScript & Node Build Outputs
+# ------------------------------------------------------------------------------
 node_modules/
-frontend/.nuxt/
-frontend/.output/
-frontend/.nitro/
-frontend/.cache/
-frontend/dist/
-frontend/node_modules/
-frontend/.data/
+**/node_modules/
+.output/
+**/.output/
+.data/
+**/.data/
+.nuxt/
+**/.nuxt/
+.nitro/
+**/.nitro/
+.cache/
+**/.cache/
+dist/
+**/dist/
+.vite/
+**/.vite/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+.turbo/
+.parcel-cache/
 
-# Logs & Runtime data
+# ------------------------------------------------------------------------------
+# Logs & Runtime Process Files
+# ------------------------------------------------------------------------------
 logs/
+**/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# OS & IDE metadata
+# ------------------------------------------------------------------------------
+# Operating Systems & IDEs
+# ------------------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+
 .vscode/
 .idea/
 .fleet/
+*.sublime-workspace
+*.sublime-project
+*.code-workspace
+*.swp
+*.swo
+
+# ------------------------------------------------------------------------------
+# AI Agents, In-memory Diagnostics & Virtual Workspaces
+# ------------------------------------------------------------------------------
+__pyrefly_virtual__/
+.system_generated/
+**/.system_generated/
+scratch/
+**/scratch/
+.gemini/
+**/.gemini/
+.claude/
+**/.claude/
+.cursor/
+**/.cursor/

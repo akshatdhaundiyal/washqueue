@@ -20,14 +20,14 @@ This document outlines the milestones and key checkpoints for developing, valida
 - [x] Map endpoint `/api/scheduler/tick` that transitions overdue machines from `in_use` to `idle_full`.
 - [x] Add logger notifications signaling when a machine's cycle is complete and status shifts.
 
-## Milestone 4: Nuxt 3 Frontend Init & Tailwind Integration
-- [x] Initialize Nuxt 3 project structure in `frontend/`.
+## Milestone 4: Nuxt Frontend Init & Tailwind Integration
+- [x] Initialize Nuxt project structure in `frontend/`.
 - [x] Add Tailwind CSS module and configure styles/typography.
 - [x] Build main layout framework and responsive design grids.
 
 ## Milestone 5: Local Edge WebSockets & Real-Time Sync
 - [x] Implement native FastAPI WebSocket ConnectionManager (`/ws`).
-- [x] Connect Nuxt 3 frontend using custom `useLocalWebSocket` composable for zero-latency local LAN updates.
+- [x] Connect Nuxt frontend using custom `useLocalWebSocket` composable for zero-latency local LAN updates.
 - [x] Implement localized client-side countdown timer calculating difference between `estimated_end_at` and current time.
 - [x] Style color transitions: Green (`available`), Red (`in_use`), Orange (`idle_full`).
 
@@ -48,3 +48,127 @@ This document outlines the milestones and key checkpoints for developing, valida
 - [x] Support remote status inspection and mobile WebPush notifications via Cloud DB.
 - [x] Migrate Python environment to native `uv` project management (`pyproject.toml`, `uv.lock`, `uv run`).
 - [x] Containerize backend with `Dockerfile` using multi-stage `uv sync`.
+
+## Milestone 9: High-Speed Live Telemetry & Real-Time WebSockets
+- [x] Optimize background telemetry polling loop to **1-second interval** (`TELEMETRY_POLL_INTERVAL=1`).
+- [x] Implement real-time `telemetry_update` broadcast over WebSocket (`/ws`) delivering sub-10ms instantaneous telemetry pushes.
+- [x] Build live aggregate telemetry banner in Admin portal (Total Load in Watts, Grid Voltage, Online Nodes, Active Running Machines).
+- [x] Provide color-coded instantaneous telemetry cards per plug (Watts, Volts, Current, Energy) with manual refresh and cloud auto-discovery.
+
+## Milestone 10: Schema Hardening & Multi-Socket Support
+- [x] Add composite unique constraint on `(mac_address, outlet_index)` for multi-socket power strips.
+- [x] Add 1-to-1 machine constraint (`uq_smart_plugs_machine_id`) and relaxed device ID indexing for clean re-pairing.
+- [x] Implement compound index on `telemetry_readings(plug_id, recorded_at DESC)`.
+- [x] Add consecutive failure tracking (`consecutive_failures`) and error diagnosis (`last_error`) columns.
+- [x] Migrate SQLite and PostgreSQL schemas (`supabase_schema_v2.sql`) and clean dummy test records.
+
+## Milestone 11: Remote Relay Switching & Isolated Network Fallback
+- [x] Add `@router.post("/{id}/switch")` FastAPI endpoint for toggling smart plug power relays remotely.
+- [x] Implement Tuya Cloud API command fallback (`{"commands": [{"code": "switch_1", "value": on}]}`) when local TCP socket connects fail due to router client isolation.
+- [x] Add immediate optimistic switch toggle feedback on the admin interface.
+
+## Milestone 12: Dual Database Portal (Local SQLite & Cloud PostgreSQL)
+- [x] Build `DatabasePortalService` supporting connection pooling for both Local SQLite (`washqueue.db`) and Cloud PostgreSQL (`Supabase`).
+- [x] Create administrative routes: `GET /api/admin/database/status`, `GET /api/admin/database/table-data`, and `POST /api/admin/database/query`.
+- [x] Implement Read-Only safety guardrail allowing `SELECT`, `WITH`, `PRAGMA`, and `EXPLAIN` while rejecting destructive statements (`DROP`, `DELETE`, `TRUNCATE`).
+- [x] Build Admin Portal **Tab 3: DATABASE_PORTAL** with database switcher, table browser tabs, pagination, and interactive SQL console with JSON export.
+
+## Milestone 13: Dribbble Minimal Mobile & Desktop UI Transformation
+- [x] Redesign resident dashboard ([`frontend/app/pages/index.vue`](file:///d:/lab/projects/washqueue/frontend/app/pages/index.vue)) using Nuxt 4 and Lucide icons.
+- [x] Responsive layout: luxury centered mobile frame on desktop, edge-to-edge native app feel on mobile.
+- [x] iOS Dynamic Island, 5G signal indicator, and battery status bar.
+- [x] Light & Dark mode toggle with persistent transition aesthetics.
+- [x] **My Active Wash Card**: live duration meter, % progress bar against 45-min cycle, power state checklist.
+- [x] Top-right quick settings button linking directly to the Admin Portal.
+- [x] Floating bottom dock navigation (`Waves`, `Disc`, `User`).
+
+## Milestone 14: Student Registration, Double-Sharing Rooms & Privacy Guardrails
+- [x] Implement `POST /api/auth/register` and `POST /api/auth/login` with SHA-256 + salt password hashing.
+- [x] Add multi-resident double-sharing room support (composite key uniqueness on `Name + Room Number`).
+- [x] Build Student Sign-In / Registration modal on client dashboard with `localStorage` session persistence.
+- [x] Anonymize public machine occupancy views (`"Occupied by Resident"` vs `"Your Active Appliance"`).
+- [x] Expose unmasked student details on Admin views for audit integrity.
+
+## Milestone 15: Targeted Separate Pings, 4-Hour Power Analytics & Live Search
+- [x] Separate ping actions into two distinct buttons: **`🔔 Ping Occupant`** (nudge resident to collect clothes) and **`🛡️ Alert Admin`** (escalate unattended laundry to hostel warden).
+- [x] Add historical telemetry endpoint `GET /api/smart-plugs/{id}/history?hours=4` tagging `source: "local"` (1s WS density) vs `source: "cloud"` (periodic fallback).
+- [x] Build interactive 4-Hour Power Graph SVG modal with smooth emerald gradient (`#10b981`), cyan diamond points (`#06b6d4`), hover tooltips, and real-time WebSocket append.
+- [x] Implement real-time search filter bar in Admin Tab 4 (Users & Settings) with **`Shared`** room badges for double-sharing rooms.
+- [x] Reorganize Admin portal into 4 structured tabs with collapsible quick metrics header banner and light theme as default.
+
+## Milestone 16: Visual Graph & WebSocket Threshold Calibration Studio
+- [x] Build `PATCH /api/smart-plugs/{id}/calibration` endpoint with atomic batch update for similar machines.
+- [x] Create `ThresholdTunerModal.vue` with 1-click appliance profile presets (Front-Load Eco, Top-Load Heavy, Commercial Dryer, Custom).
+- [x] Implement draggable horizontal guide lines on live SVG chart (Emerald for Active Running Cutoff, Amber for Soak/Pause Cutoff).
+- [x] Add colored backdrop zones on the SVG chart (Emerald for Active Wash Zone, Amber for Soak Debounce Zone, Slate for Standby).
+- [x] Provide real-time state simulator banner with live load readouts, soak countdown timers, and live WebSocket updates.
+- [x] Add `🎛️ Tune Thresholds` action button on smart plug cards in Admin Tab 2.
+
+## Milestone 17: Modern Layout Overhaul (Desktop Sidebar & Mobile Header)
+- [x] Eliminate awkward centered mobile-frame container on desktop in favor of a modern full-width layout.
+- [x] Build sticky desktop left navigation sidebar (`AppSidebar`) housing Home, Appliances Hub, Resident Profile, Settings, Admin shortcut, and Common Login.
+- [x] Build native mobile top header (`AppTopHeader`) with notification bell, settings, and user avatar as the sole mobile gateway to Profile.
+- [x] Streamline mobile bottom dock (`MobileBottomNav`) to `Home` and `Appliances` only with live available unit counter badge.
+
+## Milestone 18: Tabular Telemetry & Dual Typography Engine
+- [x] Establish **Plus Jakarta Sans** as primary application typeface for high readability, geometric structure, and crisp headings.
+- [x] Implement **JetBrains Mono** across all numerical metrics, live stopwatch (`runningMinutes`), wattages (`340W`, `0W`), status pill badges (`46m ON`, `DONE (18m)`), grid voltages, and database rows.
+- [x] Apply `-webkit-font-smoothing: antialiased`, `-moz-osx-font-smoothing: grayscale`, and `font-variant-numeric: tabular-nums` globally to eliminate digit shifting and layout twitch during real-time telemetry ticks.
+
+## Milestone 19: Unified Common Login Portal & Admin Visual Alignment
+- [x] Build unified authentication hub at `/login` serving both Resident Students and Hostel Administrators.
+- [x] Implement role switcher with 1-tap demo credentials for students (`Room 214 • Akshat`) and operators (`PIN 1234`).
+- [x] Realign Operator Admin Console (`/admin`) to match the desktop left sidebar navigation, top telemetry stream header, and color palette.
+
+## Milestone 20: Codebase Modularization & Dead Code Elimination
+- [x] Audit codebase for redundancy and delete 7 orphaned legacy components (`frontend/app/components/student/*` and `AdminHeader.vue`).
+- [x] Modularize `frontend/app/pages/index.vue` from 1,370 monolithic lines down to ~500 lines by creating 8 focused single-responsibility components in `frontend/app/components/hub/`.
+- [x] Modularize `frontend/app/pages/admin.vue` layout into `AdminSidebar.vue` and `AdminTopHeader.vue`.
+- [x] Verify full production build compilation (`npm run build`) with zero errors across all routes.
+
+## Milestone 21: Reusable SVG Logo & Multi-Tier Institutional Branding
+- [x] Create standalone `<AppLogo />` Vue component (`frontend/app/components/AppLogo.vue`) encapsulating custom SVG vector graphic.
+  - Supports `mode="full"` (440×120 wordmark with washer drum mark, "Wash", sky-blue "Queue", and tagline) and `mode="icon"` (aspect-square 100×100 mark).
+  - Automatically resolves dark/light theme state from `useAppTheme()` to render "Wash" in `#FFFFFF` on dark backgrounds and `#191D24` on light backgrounds.
+  - Generates collision-proof instance-scoped SVG gradient IDs (`wq-grad-[id]`, `wave-grad-[id]`).
+- [x] Create composite `<AppBranding />` component (`frontend/app/components/common/AppBranding.vue`) rendering Logo + Divider + University/Organization + Hostel/Residence Hall.
+- [x] Build `useHostelBranding()` composable managing reactive state and `localStorage` persistence for organization and hostel identity.
+- [x] Build full Institutional Branding Management Suite in Admin Tab 4 (`UsersSettingsTab.vue`):
+  - Inputs for organization name, acronym, and logo (URL or local image file upload).
+  - Inputs for hostel name, floor location, and crest (URL or local image file upload).
+  - Live side-by-side Light Mode and Dark Mode preview cards showing real-time rendering.
+  - One-click reset to factory defaults.
+- [x] Integrate composite branding across Mobile Header, Desktop Header, Dashboard Sidebar, Admin Sidebar, and Login Portal.
+
+## Milestone 22: Comprehensive Font Color, Contrast & Theme Parity Audit
+- [x] Audit all components across frontend codebase for hardcoded low-contrast colors and dark-only containers.
+- [x] Eliminate all occurrences of legacy prototype color `#86948a` across `UsersSettingsTab.vue`, `DatabasePortalTab.vue`, `IotTab.vue`, `FleetTab.vue`, `PowerGraphModal.vue`, and `ThresholdTunerModal.vue`.
+- [x] Convert modal close buttons (`✕`) to adaptive hover states (`text-slate-400 hover:text-white hover:bg-slate-800` in dark mode, `text-slate-500 hover:text-slate-900 hover:bg-slate-100` in light mode).
+- [x] Update database record tables and SQL query tables in `DatabasePortalTab.vue` from hardcoded black boxes to adaptive light/dark surfaces.
+- [x] Convert instantaneous power gauge box in `IotTab.vue` to theme-adaptive card.
+- [x] Verify font family consistency: **Plus Jakarta Sans** for UI and **JetBrains Mono** with `tabular-nums` for all telemetry and data tables.
+- [x] Execute clean production build with `npm run build` (0 errors, Exit code 0).
+
+## Milestone 23: Washing Machine Card 4-Hour Power Consumption Popup
+- [x] Implement backend endpoint `GET /api/machines/{id}/power-history?hours=4` returning full 4-hour telemetry time-series for resident inspection (no admin PIN required).
+- [x] Enhance shared `<PowerGraphModal>` with dynamic wall-clock timestamps (`HH:mm`) and vertical grid lines across the X-axis (`-4h`, `-3h`, `-2h`, `-1h`, `Now`).
+- [x] Make `<ApplianceCard>` fully tappable with hover affordance and click handler emitting `view-history`.
+- [x] Add quick-trigger `4h 📈` button in the appliance card header and a `📈 4h Graph` pill next to current draw.
+- [x] Add `📈 4h Power Curve` action button in `<HomeHeroMachine>` for the active claimed wash load.
+- [x] Implement automatic fallback to realistic 4-hour simulated washing machine curve for offline demo reliability.
+- [x] Mount `<PowerGraphModal>` in `frontend/app/pages/index.vue` with real-time WebSocket tick integration.
+- [x] Verify production build (`npm run build` exit code 0).
+
+## Milestone 24: Role-Based Separation & Elimination of Prototype View-Switchers
+- [x] Remove prototype `"Admin Console"` navigation link (`/admin`) from the resident sidebar (`AppSidebar.vue`).
+- [x] Remove `"Operator Admin Console"` button from the student settings modal (`SettingsModal.vue`).
+- [x] Add an authentic `<LogOut />` action directly into the resident profile card in `AppSidebar.vue` linking cleanly to `/login`.
+- [x] Remove prototype `"Resident Hub View"` (`/`) and `"Common Login Portal"` (`/login`) navigation links from the admin console sidebar (`AdminSidebar.vue`).
+- [x] Remove the mobile header's `"Resident Hub"` icon button from `AdminTopHeader.vue`.
+- [x] Update the header link on the locked admin PIN screen from `"Resident Hub"` to `"Login Portal"` (`/login`).
+- [x] Consolidate user authentication and role-based routing through the unified `/login` portal.
+- [x] Verify production build (`npm run build` exit code 0).
+
+
+
+

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 try:
     from app.models import Machine, Booking, Queue, SmartPlug, TelemetryReading, User
 except ImportError:
-    from models import Machine, Booking, Queue, SmartPlug, TelemetryReading, User
+    from .models import Machine, Booking, Queue, SmartPlug, TelemetryReading, User
 
 class MachineRepository:
     @staticmethod
@@ -224,6 +224,17 @@ class SmartPlugRepository:
     @staticmethod
     async def get_by_id(db: AsyncSession, plug_id: UUID) -> Optional[SmartPlug]:
         result = await db.execute(select(SmartPlug).where(SmartPlug.id == plug_id))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_by_mac(db: AsyncSession, mac_address: str) -> Optional[SmartPlug]:
+        normalized = mac_address.lower().replace("-", ":")
+        result = await db.execute(select(SmartPlug).where(func.lower(SmartPlug.mac_address) == normalized))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_by_device_id(db: AsyncSession, device_id: str) -> Optional[SmartPlug]:
+        result = await db.execute(select(SmartPlug).where(SmartPlug.device_id == device_id))
         return result.scalar_one_or_none()
 
     @staticmethod

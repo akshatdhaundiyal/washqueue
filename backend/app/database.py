@@ -9,6 +9,19 @@ except ImportError:
 # Create database engine
 engine = create_async_engine(settings.async_database_url, echo=False)
 
+# Configure SQLite pragmas for concurrency, robustness, and persistence
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+import sqlite3
+
+@event.listens_for(engine.sync_engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
 # Async session factory
 async_session = async_sessionmaker(
     bind=engine,

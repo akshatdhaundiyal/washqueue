@@ -57,12 +57,21 @@ async def process_plug_telemetry(db: AsyncSession, plug: SmartPlug):
         now = datetime.datetime.now(datetime.timezone.utc)
         is_online = reading.raw_dps is not None and "error" not in reading.raw_dps
         
-        # 1. Update plug online state
+        # 1. Update plug online & health state
         plug.is_online = is_online
         if is_online:
             plug.last_seen_at = now
+            plug.consecutive_failures = 0
+            plug.last_error = None
+        else:
+            plug.consecutive_failures = (plug.consecutive_failures or 0) + 1
+            if isinstance(reading.raw_dps, dict) and "error" in reading.raw_dps:
+                plug.last_error = str(reading.raw_dps["error"])
+            else:
+                plug.last_error = "Device unreachable"
 
         # 2. Record telemetry reading if online or error payload
+        source_tag = getattr(reading, "source", "local") or "local"
         telemetry_entry = TelemetryReading(
             plug_id=plug.id,
             voltage_v=reading.voltage_v,
@@ -70,9 +79,26 @@ async def process_plug_telemetry(db: AsyncSession, plug: SmartPlug):
             power_w=reading.power_w,
             energy_kwh=reading.energy_kwh,
             switch_on=reading.switch_on,
+            source=source_tag,
             recorded_at=now
         )
         db.add(telemetry_entry)
+
+        # Broadcast real-time telemetry update over WebSocket to connected Admin dashboards (< 10ms)
+        asyncio.create_task(ws_manager.broadcast({
+            "type": "telemetry_update",
+            "plug_id": str(plug.id),
+            "is_online": is_online,
+            "telemetry": {
+                "voltage_v": reading.voltage_v,
+                "current_ma": reading.current_ma,
+                "power_w": reading.power_w,
+                "energy_kwh": reading.energy_kwh,
+                "switch_on": reading.switch_on,
+                "source": source_tag,
+                "recorded_at": now.isoformat()
+            }
+        }))
 
         # 3. State Inference Logic (if plug is mapped to a machine)
         if plug.machine_id and is_online and reading.power_w is not None:
@@ -141,7 +167,7 @@ async def process_plug_telemetry(db: AsyncSession, plug: SmartPlug):
     except Exception as e:
         logger.error(f"Failed to process smart plug {plug.device_id} ({plug.ip_address}): {e}")
 
-async def start_telemetry_polling_loop(interval_seconds: int = 10):
+async def start_telemetry_polling_loop(interval_seconds: int = 1):
     """
     Background worker loop for polling smart plugs.
     """

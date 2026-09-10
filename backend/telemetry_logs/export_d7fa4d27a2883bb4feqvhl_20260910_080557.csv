@@ -1,0 +1,4 @@
+timestamp_iso,voltage_v,current_ma,power_w,energy_kwh,switch_on,source
+2026-09-10T02:35:14.386433,214.3,0.0,0.0,0.01,True,local
+2026-09-10T02:35:15.529824,214.3,0.0,0.0,0.01,True,local
+2026-09-10T02:35:17.377629,214.3,0.0,0.0,0.01,True,local

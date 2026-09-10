@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
     from app.database import engine, Base, get_db
+    from app.routers.auth import router as auth_router
     from app.routers.machines import router as machines_router
     from app.routers.admin import router as admin_router
     from app.routers.smart_plugs import router as smart_plugs_router
@@ -17,6 +18,7 @@ try:
     from app.config import settings
 except ImportError:
     from .database import engine, Base, get_db
+    from .routers.auth import router as auth_router
     from .routers.machines import router as machines_router
     from .routers.admin import router as admin_router
     from .routers.smart_plugs import router as smart_plugs_router
@@ -31,7 +33,21 @@ async def lifespan(app: FastAPI):
     # Automatically create database tables if they do not exist
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        
+
+        def migrate_user_columns(sync_conn):
+            try:
+                # Check for SQLite table columns
+                cursor = sync_conn.connection.cursor()
+                cursor.execute("PRAGMA table_info(users)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if columns:
+                    for col in ["university", "college", "hostel"]:
+                        if col not in columns:
+                            cursor.execute(f"ALTER TABLE users ADD COLUMN {col} VARCHAR")
+            except Exception:
+                pass
+
+        await conn.run_sync(migrate_user_columns)
     # Auto-seed initial machines and users if empty
     from sqlalchemy import select
     try:
@@ -96,6 +112,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(machines_router)
 app.include_router(admin_router)
 app.include_router(smart_plugs_router)

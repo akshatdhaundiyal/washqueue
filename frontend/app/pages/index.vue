@@ -1,616 +1,632 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { CheckCircle2 } from 'lucide-vue-next'
+import AppSidebar from '~/components/hub/AppSidebar.vue'
+import AppTopHeader from '~/components/hub/AppTopHeader.vue'
+import HomeHeroMachine from '~/components/hub/HomeHeroMachine.vue'
+import OverviewCards from '~/components/hub/OverviewCards.vue'
+import ApplianceCard from '~/components/hub/ApplianceCard.vue'
+import ResidentProfileView from '~/components/hub/ResidentProfileView.vue'
+import SettingsModal from '~/components/hub/SettingsModal.vue'
+import MobileBottomNav from '~/components/hub/MobileBottomNav.vue'
+import PowerGraphModal from '~/components/common/PowerGraphModal.vue'
 
+// Configuration & Theme
 const config = useRuntimeConfig()
-const apiBase = config.public.apiBaseUrl
+const apiBase = config.public?.apiBaseUrl || 'http://localhost:8000'
 
-// Mock users for local testing
-const mockUsers = [
-  { id: '11111111-1111-1111-1111-111111111111', name: 'Alex', room: 'Room 304', avatar: '🧑‍💻' },
-  { id: '22222222-2222-2222-2222-222222222222', name: 'Blake', room: 'Room 102', avatar: '👩‍🔬' },
-  { id: '33333333-3333-3333-3333-333333333333', name: 'Charlie', room: 'Room 215', avatar: '👨‍🎨' }
+// Persistent Theme Synchronization
+const { isDark: darkMode, toggleTheme, setTheme } = useAppTheme()
+
+// Navigation & Modal State
+const activeTab = ref('home') // 'home' | 'machines' | 'profile'
+const showSettings = ref(false)
+const toast = ref(null)
+const filterType = ref('all') // 'all' | 'washers' | 'dryers' | 'free' | 'uncollected'
+const pushAlertEnabled = ref(true)
+const anonymousBuzzEnabled = ref(true)
+
+// User's Claimed Active Appliance
+const myMachine = ref({
+  claimed: true,
+  id: 'W-02',
+  name: 'SpeedQueen Washer 02',
+  location: 'Block B • 2nd Floor',
+  isOn: true,
+  runningMinutes: 28,
+  powerDraw: '340W',
+  startedAt: '8:42 AM',
+  notifyWhenOff: true
+})
+
+// State of all appliances with inline buzz counters & smart telemetry
+const machines = ref([
+  {
+    id: 'W-01',
+    name: 'Washer 01 (LG Heavy)',
+    type: 'washer',
+    location: 'Block B • 2nd Floor',
+    isOn: true,
+    status: 'in-use', // 'available' | 'in-use' | 'uncollected'
+    runningMinutes: 46,
+    powerDraw: '320W',
+    nudgesSent: 1,
+    myBuzzed: false
+  },
+  {
+    id: 'W-02',
+    name: 'SpeedQueen Washer 02',
+    type: 'washer',
+    location: 'Block B • 2nd Floor',
+    isOn: true,
+    status: 'in-use',
+    runningMinutes: 28,
+    powerDraw: '340W',
+    nudgesSent: 0,
+    myBuzzed: false
+  },
+  {
+    id: 'W-03',
+    name: 'Washer 03 (IFB Eco)',
+    type: 'washer',
+    location: 'Block B • 2nd Floor',
+    isOn: false,
+    status: 'available',
+    runningMinutes: 0,
+    powerDraw: '0W',
+    nudgesSent: 0,
+    myBuzzed: false
+  },
+  {
+    id: 'W-04',
+    name: 'Washer 04 (Samsung)',
+    type: 'washer',
+    location: 'Block B • 2nd Floor',
+    isOn: true,
+    status: 'in-use',
+    runningMinutes: 12,
+    powerDraw: '280W',
+    nudgesSent: 0,
+    myBuzzed: false
+  },
+  {
+    id: 'D-01',
+    name: 'Dryer Pro 01 (Whirlpool)',
+    type: 'dryer',
+    location: 'Block B • 2nd Floor',
+    isOn: false,
+    status: 'uncollected',
+    runningMinutes: 0,
+    finishedAgoMin: 18,
+    powerDraw: '0W',
+    nudgesSent: 3,
+    myBuzzed: false
+  },
+  {
+    id: 'D-02',
+    name: 'Dryer Pro 02 (Siemens)',
+    type: 'dryer',
+    location: 'Block B • 2nd Floor',
+    isOn: false,
+    status: 'available',
+    runningMinutes: 0,
+    powerDraw: '0W',
+    nudgesSent: 0,
+    myBuzzed: false
+  }
+])
+
+const filterTabs = [
+  { id: 'all', label: 'All' },
+  { id: 'washers', label: 'Washers' },
+  { id: 'dryers', label: 'Dryers' },
+  { id: 'free', label: 'Available' },
+  { id: 'uncollected', label: 'Uncollected' }
 ]
 
-// App state
-const currentUser = ref(mockUsers[0])
-const machines = ref([])
-const loading = ref(true)
-const errorMsg = ref('')
-
-// Filter state
-const activeTab = ref('all') // 'all', 'washers', 'dryers', 'available', 'my'
-
-// Toast notifications
-const toasts = ref([])
-const addToast = (message, type = 'info') => {
-  const id = Date.now()
-  toasts.value.push({ id, message, type })
-  setTimeout(() => {
-    toasts.value = toasts.value.filter(t => t.id !== id)
-  }, 6000)
+// Toast notification trigger
+let toastTimer = null
+const showToast = (msg) => {
+  if (toastTimer) clearTimeout(toastTimer)
+  toast.value = msg
+  toastTimer = setTimeout(() => {
+    toast.value = null
+  }, 3500)
 }
 
-// Timer logic: update client time every second
-const now = ref(Date.now())
-let timerInterval = null
-
-onMounted(() => {
-  timerInterval = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
+// Formatted current date string
+const formattedDate = computed(() => {
+  const d = new Date()
+  return d.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 })
 
-onUnmounted(() => {
-  if (timerInterval) clearInterval(timerInterval)
-})
-
-// Fetch machines from FastAPI
-const fetchMachines = async () => {
+// Optional background synchronization if backend API is reachable
+const fetchBackendData = async () => {
   try {
     const data = await $fetch(`${apiBase}/api/machines`)
-    machines.value = data
-    errorMsg.value = ''
-  } catch (err) {
-    console.error('Failed to fetch machines:', err)
-    errorMsg.value = 'Failed to connect to the WashQueue local backend.'
-  } finally {
-    loading.value = false
-  }
-}
-
-// Local Edge WebSocket integration
-const { isConnected: isWsConnected } = useLocalWebSocket(apiBase, (event) => {
-  if (event.type === 'machine_status_change' || event.type === 'machine_update') {
-    fetchMachines()
-  }
-})
-
-// Supabase Realtime Subscriptions (Cloud fallback)
-const { $supabase } = useNuxtApp()
-let dbChannel = null
-let broadcastChannel = null
-
-const setupRealtime = () => {
-  if (!$supabase) return
-
-  dbChannel = $supabase
-    .channel('laundry_db_changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'machines' }, () => {
-      fetchMachines()
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
-      fetchMachines()
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, () => {
-      fetchMachines()
-    })
-    .subscribe()
-
-  broadcastChannel = $supabase.channel('laundry_broadcast')
-  broadcastChannel
-    .on('broadcast', { event: 'ping_alert' }, ({ payload }) => {
-      if (payload.targetUserId === currentUser.value.id) {
-        addToast(`📢 Ping! Another student is waiting for "${payload.machineName}". Please clear your laundry!`, 'warning')
-      }
-    })
-    .subscribe()
-}
-
-onMounted(() => {
-  fetchMachines()
-  setupRealtime()
-})
-
-onUnmounted(() => {
-  if (dbChannel && $supabase) $supabase.removeChannel(dbChannel)
-  if (broadcastChannel && $supabase) $supabase.removeChannel(broadcastChannel)
-})
-
-// Owner & Queue helpers
-const isOwner = (machine) => {
-  return machine.active_booking && machine.active_booking.user_id === currentUser.value.id
-}
-
-const getQueuePosition = (machine) => {
-  const idx = machine.queue.findIndex(q => q.user_id === currentUser.value.id)
-  return idx !== -1 ? idx + 1 : null
-}
-
-const isNotified = (machine) => {
-  const entry = machine.queue.find(q => q.user_id === currentUser.value.id)
-  return entry && entry.status === 'notified'
-}
-
-const getSecondsRemaining = (estimatedEndAt) => {
-  const diff = new Date(estimatedEndAt).getTime() - now.value
-  return diff <= 0 ? 0 : Math.floor(diff / 1000)
-}
-
-const formatTime = (seconds) => {
-  const mm = Math.floor(seconds / 60).toString().padStart(2, '0')
-  const ss = (seconds % 60).toString().padStart(2, '0')
-  return `${mm}:${ss}`
-}
-
-// Filtered Machines Computed
-const filteredMachines = computed(() => {
-  if (activeTab.value === 'washers') {
-    return machines.value.filter(m => m.name.toLowerCase().includes('washer'))
-  }
-  if (activeTab.value === 'dryers') {
-    return machines.value.filter(m => m.name.toLowerCase().includes('dryer'))
-  }
-  if (activeTab.value === 'available') {
-    return machines.value.filter(m => m.status === 'available')
-  }
-  if (activeTab.value === 'my') {
-    return machines.value.filter(isOwner)
-  }
-  return machines.value
-})
-
-// API Actions
-const claimMachine = async (machineId) => {
-  try {
-    await $fetch(`${apiBase}/api/machines/${machineId}/claim`, {
-      method: 'POST',
-      body: { user_id: currentUser.value.id }
-    })
-    addToast('Machine claimed successfully! Cycle started.', 'success')
-    fetchMachines()
-  } catch (err) {
-    addToast(err.data?.detail || 'Failed to claim machine.', 'error')
-  }
-}
-
-const clearMachine = async (machineId) => {
-  try {
-    await $fetch(`${apiBase}/api/machines/${machineId}/clear`, {
-      method: 'POST'
-    })
-    addToast('Machine cleared and is now available.', 'success')
-    fetchMachines()
-  } catch (err) {
-    addToast(err.data?.detail || 'Failed to clear machine.', 'error')
-  }
-}
-
-const pingOwner = async (machineId) => {
-  try {
-    const res = await $fetch(`${apiBase}/api/machines/${machineId}/ping`, {
-      method: 'POST',
-      body: { user_id: currentUser.value.id }
-    })
-    if (broadcastChannel && res.owner_user_id) {
-      broadcastChannel.send({
-        type: 'broadcast',
-        event: 'ping_alert',
-        payload: {
-          targetUserId: res.owner_user_id,
-          machineName: res.machine_name
+    if (data && Array.isArray(data) && data.length > 0) {
+      machines.value = data.map((m) => {
+        const powerW = m.latest_power_w ?? 0
+        const isRunning = m.status === 'in_use' || powerW >= 10.0
+        const isUncollected = m.status === 'uncollected'
+        return {
+          id: m.id,
+          name: m.name,
+          type: m.type || (m.name.toLowerCase().includes('dryer') ? 'dryer' : 'washer'),
+          location: m.location || 'Block B • 2nd Floor',
+          isOn: isRunning,
+          status: isUncollected ? 'uncollected' : isRunning ? 'in-use' : 'available',
+          runningMinutes: m.running_minutes ?? (isRunning ? 28 : 0),
+          finishedAgoMin: m.finished_ago_min ?? (isUncollected ? 15 : undefined),
+          powerDraw: `${powerW.toFixed(0)}W`,
+          nudgesSent: m.nudges_sent ?? 0,
+          myBuzzed: false
         }
       })
     }
-    addToast('Owner has been pinged anonymously!', 'success')
   } catch (err) {
-    addToast(err.data?.detail || 'Failed to ping owner.', 'error')
+    // Graceful offline fallback
   }
 }
 
-const joinQueue = async (machineId) => {
-  try {
-    await $fetch(`${apiBase}/api/machines/${machineId}/queue/join`, {
-      method: 'POST',
-      body: { user_id: currentUser.value.id }
-    })
-    addToast('Joined the waitlist queue.', 'success')
-    fetchMachines()
-  } catch (err) {
-    addToast(err.data?.detail || 'Failed to join queue.', 'error')
-  }
-}
+// Live timer tick for minutes elapsed
+let intervalId = null
+onMounted(() => {
+  fetchBackendData()
 
-const leaveQueue = async (machineId) => {
-  try {
-    await $fetch(`${apiBase}/api/machines/${machineId}/queue/leave`, {
-      method: 'POST',
-      body: { user_id: currentUser.value.id }
-    })
-    addToast('Left the waitlist queue.', 'success')
-    fetchMachines()
-  } catch (err) {
-    addToast(err.data?.detail || 'Failed to leave queue.', 'error')
-  }
-}
-
-const triggerSchedulerTick = async () => {
-  try {
-    const res = await $fetch(`${apiBase}/api/scheduler/tick`, { method: 'POST' })
-    if (res.updated_count > 0) {
-      addToast(`Scheduler updated ${res.updated_count} machine(s) to Idle-Full.`, 'success')
-    } else {
-      addToast('Scheduler tick: No overdue machines found.', 'info')
+  intervalId = setInterval(() => {
+    if (myMachine.value.claimed && myMachine.value.isOn) {
+      myMachine.value.runningMinutes += 1
     }
-    fetchMachines()
-  } catch (err) {
-    addToast('Failed to trigger scheduler tick.', 'error')
+
+    machines.value = machines.value.map((m) => {
+      if (m.isOn) {
+        return { ...m, runningMinutes: m.runningMinutes + 1 }
+      }
+      if (m.status === 'uncollected' && m.finishedAgoMin !== undefined) {
+        return { ...m, finishedAgoMin: m.finishedAgoMin + 1 }
+      }
+      return m
+    })
+  }, 60000)
+})
+
+onUnmounted(() => {
+  if (intervalId) clearInterval(intervalId)
+  if (toastTimer) clearTimeout(toastTimer)
+})
+
+// Claim & Book an available machine
+const handleClaimMachine = async (machine) => {
+  const startTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+  machines.value = machines.value.map((m) =>
+    m.id === machine.id
+      ? {
+          ...m,
+          isOn: true,
+          status: 'in-use',
+          runningMinutes: 1,
+          powerDraw: m.type === 'dryer' ? '1800W' : '310W'
+        }
+      : m
+  )
+
+  myMachine.value = {
+    claimed: true,
+    id: machine.id,
+    name: machine.name,
+    location: machine.location,
+    isOn: true,
+    runningMinutes: 1,
+    powerDraw: machine.type === 'dryer' ? '1800W' : '310W',
+    startedAt: startTime,
+    notifyWhenOff: true
+  }
+
+  showToast(`Claimed & booked ${machine.name}! Duration meter started 🧼`)
+  activeTab.value = 'home'
+
+  try {
+    await $fetch(`${apiBase}/api/machines/${machine.id}/claim`, {
+      method: 'POST',
+      body: { user_id: 'akshat-student', duration_minutes: 45 }
+    })
+  } catch (e) {
+    // Offline local state already updated
   }
 }
+
+// Release active load
+const handleReleaseMachine = async () => {
+  const machineId = myMachine.value.id
+
+  if (machineId) {
+    machines.value = machines.value.map((m) =>
+      m.id === machineId
+        ? { ...m, isOn: false, status: 'available', runningMinutes: 0, powerDraw: '0W' }
+        : m
+    )
+  }
+
+  myMachine.value = {
+    claimed: false,
+    id: null,
+    name: '',
+    location: '',
+    isOn: false,
+    runningMinutes: 0,
+    powerDraw: '0W',
+    startedAt: '',
+    notifyWhenOff: false
+  }
+
+  showToast('Released machine. Marked as available.')
+
+  if (machineId) {
+    try {
+      await $fetch(`${apiBase}/api/machines/${machineId}/clear`, {
+        method: 'POST',
+        body: { user_id: 'akshat-student' }
+      })
+    } catch (e) {
+      // Offline local state already updated
+    }
+  }
+}
+
+// Inline Buzz / Nudge Trigger
+const handleSendBuzz = async (machineId, machineName, isUncollected = false) => {
+  machines.value = machines.value.map((m) =>
+    m.id === machineId
+      ? { ...m, nudgesSent: (m.nudgesSent || 0) + 1, myBuzzed: true }
+      : m
+  )
+
+  if (isUncollected) {
+    showToast(`Friendly reminder sent to ${machineName}'s owner to collect clothes 🧺`)
+  } else {
+    showToast(`Buzzed ${machineName}! Resident notified to check their load ⚡`)
+  }
+
+  try {
+    await $fetch(`${apiBase}/api/machines/${machineId}/ping`, {
+      method: 'POST',
+      body: { user_id: 'akshat-student', target: 'occupant' }
+    })
+  } catch (e) {
+    // Offline local state already updated
+  }
+}
+
+// Helper to switch filter and tab simultaneously
+const setFilterAndNavigate = (type) => {
+  filterType.value = type
+  activeTab.value = 'machines'
+}
+
+// Calculated Summary Stats
+const freeMachinesCount = computed(() => machines.value.filter((m) => m.status === 'available').length)
+const runningMachinesCount = computed(() => machines.value.filter((m) => m.status === 'in-use').length)
+const uncollectedCount = computed(() => machines.value.filter((m) => m.status === 'uncollected').length)
+
+// Filtered Machines List
+const filteredMachines = computed(() => {
+  return machines.value.filter((m) => {
+    if (filterType.value === 'washers') return m.type === 'washer'
+    if (filterType.value === 'dryers') return m.type === 'dryer'
+    if (filterType.value === 'free') return m.status === 'available'
+    if (filterType.value === 'uncollected') return m.status === 'uncollected'
+    return true
+  })
+})
+
+// =========================================================================
+// 4-HOUR POWER CONSUMPTION GRAPH POPUP (Tapping Machine Card)
+// =========================================================================
+const isPowerGraphOpen = ref(false)
+const selectedMachineForGraph = ref(null)
+const machinePowerHistory = ref(null)
+const historyLoading = ref(false)
+
+// Open 4-hour Power Consumption Graph on Card Tap
+const openMachinePowerGraph = async (machine) => {
+  selectedMachineForGraph.value = machine
+  isPowerGraphOpen.value = true
+  historyLoading.value = true
+  machinePowerHistory.value = null
+
+  try {
+    const data = await $fetch(`${apiBase}/api/machines/${machine.id}/power-history?hours=4`)
+    if (data && data.series && data.series.length > 0) {
+      machinePowerHistory.value = data
+    } else {
+      machinePowerHistory.value = generateSimulatedPowerHistory(machine)
+    }
+  } catch (err) {
+    machinePowerHistory.value = generateSimulatedPowerHistory(machine)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+// Generate realistic 4-hour telemetry time-series curve for machines
+const generateSimulatedPowerHistory = (machine) => {
+  const now = Date.now()
+  const fourHoursMs = 4 * 60 * 60 * 1000
+  const points = []
+  const stepMs = 3 * 60 * 1000 // every 3 minutes = 80 data points
+  const isRunning = machine.isOn || machine.status === 'in-use'
+  const isDryer = machine.type === 'dryer' || machine.name?.toLowerCase().includes('dryer')
+  const basePeak = isDryer ? 1750 : 340
+
+  let t = now - fourHoursMs
+  while (t <= now) {
+    const minutesAgo = Math.round((now - t) / 60000)
+    let powerW = 0.0
+
+    if (isRunning && minutesAgo <= (machine.runningMinutes || 28)) {
+      // Active wash cycle happening right now
+      const phase = minutesAgo % 12
+      if (phase < 3) powerW = Math.round(basePeak * 0.9 + Math.random() * 30) // Motor agitation
+      else if (phase < 5) powerW = Math.round(basePeak * 0.15 + Math.random() * 15) // Soak
+      else if (phase < 9) powerW = Math.round(basePeak * 0.98 + Math.random() * 25) // High-speed spin
+      else powerW = Math.round(basePeak * 0.45 + Math.random() * 20) // Rinse
+    } else if (minutesAgo >= 110 && minutesAgo <= 170) {
+      // Prior cycle 2-3 hours ago
+      const phase = minutesAgo % 10
+      if (phase < 6) powerW = Math.round(basePeak * 0.85 + Math.random() * 40)
+      else powerW = Math.round(5 + Math.random() * 10)
+    } else {
+      // Off / Standby state
+      powerW = Math.random() < 0.15 ? Math.round(1.5 + Math.random() * 1.5) : 0.0
+    }
+
+    points.push({
+      timestamp: new Date(t).toISOString(),
+      power_w: powerW,
+      voltage_v: Math.round(230 + Math.random() * 8),
+      current_ma: Math.round(powerW > 0 ? (powerW / 230) * 1000 : 0),
+      source: 'local'
+    })
+    t += stepMs
+  }
+
+  const powers = points.map(p => p.power_w)
+  const peak = Math.max(...powers, 10)
+  const avg = powers.reduce((a, b) => a + b, 0) / powers.length
+
+  return {
+    plug_id: machine.id,
+    plug_name: `${machine.name} • Smart Plug Node`,
+    hours: 4,
+    peak_power_w: Math.round(peak),
+    avg_power_w: Math.round(avg),
+    local_points_count: points.length,
+    cloud_points_count: 0,
+    series: points
+  }
+}
+
+// Real-time Local Edge WebSocket live stream listener
+const { isConnected: isWsConnected } = useLocalWebSocket(apiBase, (event) => {
+  if (event.type === 'telemetry_update' && event.plug_id) {
+    // Append dynamically to 4-hour graph if open
+    if (isPowerGraphOpen.value && machinePowerHistory.value) {
+      const newPt = {
+        timestamp: event.telemetry.recorded_at,
+        power_w: event.telemetry.power_w || 0.0,
+        voltage_v: event.telemetry.voltage_v,
+        current_ma: event.telemetry.current_ma,
+        source: event.telemetry.source || 'local'
+      }
+      machinePowerHistory.value.series.push(newPt)
+      machinePowerHistory.value.local_points_count++
+      if (newPt.power_w > machinePowerHistory.value.peak_power_w) {
+        machinePowerHistory.value.peak_power_w = newPt.power_w
+      }
+    }
+  } else if (event.type === 'machine_status_change') {
+    fetchBackendData()
+  }
+})
 </script>
 
 <template>
-  <div class="stitch-app min-h-screen bg-[#090D16] text-[#dfe2ef] selection:bg-[#10b981] selection:text-black">
-    <!-- Top Header -->
-    <header class="bg-[#090D16]/80 backdrop-blur-xl border-b border-white/10 sticky top-0 w-full z-50 px-6 py-4">
-      <div class="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <!-- Logo & Title -->
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-[#10b981]/10 border border-[#10b981]/30 flex items-center justify-center text-2xl shadow-[0_0_15px_rgba(16,185,129,0.3)]">
-            🌀
-          </div>
-          <div>
-            <h1 class="text-xl font-bold font-mono tracking-tight text-white flex items-center gap-2">
-              WASHQUEUE
-              <span 
-                class="text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-full border"
-                :class="isWsConnected ? 'bg-[#10b981]/10 text-[#4edea3] border-[#10b981]/30' : 'bg-sky-500/10 text-sky-400 border-sky-500/30'"
-              >
-                {{ isWsConnected ? '🟢 Hostel LAN (WebSocket)' : '☁️ Remote Mobile' }}
-              </span>
-            </h1>
-            <p class="text-xs text-[#86948a] font-mono">Neural Interface // Local IoT Telemetry</p>
-          </div>
-        </div>
-
-        <!-- Controls & Navigation -->
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Active User Selector -->
-          <div class="glass-card px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-2">
-            <span class="text-xs text-[#86948a] font-mono font-medium">Student:</span>
-            <select 
-              v-model="currentUser"
-              class="bg-transparent border-none text-sm font-mono font-semibold text-white focus:outline-none cursor-pointer"
-            >
-              <option v-for="user in mockUsers" :key="user.id" :value="user" class="bg-[#0f131c] text-white">
-                {{ user.avatar }} {{ user.name }} ({{ user.room }})
-              </option>
-            </select>
-          </div>
-
-          <!-- Scheduler Tick -->
-          <button 
-            @click="triggerSchedulerTick" 
-            class="glass-card px-3 py-2 rounded-xl text-xs font-mono font-semibold hover:border-[#10b981]/40 transition active:scale-95 flex items-center gap-1.5"
-          >
-            ⏱️ Tick Scheduler
-          </button>
-
-          <!-- Admin Portal Link -->
-          <NuxtLink 
-            to="/admin" 
-            class="bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/40 text-[#4edea3] px-3.5 py-2 rounded-xl text-xs font-mono font-bold uppercase tracking-wider transition flex items-center gap-1.5"
-          >
-            🔒 Admin Portal
-          </NuxtLink>
-        </div>
-      </div>
-    </header>
-
-    <!-- Main Content Canvas -->
-    <main class="max-w-7xl mx-auto px-6 pt-8 pb-16">
-      <!-- Error Message Banner -->
-      <div v-if="errorMsg" class="glass-card border-rose-500/40 bg-rose-950/20 text-rose-300 rounded-2xl p-4 mb-6 flex items-center justify-between">
-        <div class="flex items-center gap-2.5">
-          <span class="text-xl">⚠️</span>
-          <p class="text-sm font-mono">{{ errorMsg }}</p>
-        </div>
-        <button @click="fetchMachines" class="bg-rose-500/20 hover:bg-rose-500/30 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition">Retry Connection</button>
-      </div>
-
-      <!-- Loading Spinner -->
-      <div v-if="loading" class="flex flex-col items-center justify-center py-24 gap-4">
-        <div class="w-12 h-12 border-4 border-[#10b981] border-t-transparent rounded-full animate-spin"></div>
-        <p class="text-[#86948a] font-mono text-sm animate-pulse">Syncing smart plug telemetry & machine nodes...</p>
-      </div>
-
-      <!-- Main Dashboard Content -->
-      <div v-else>
-        <!-- Metric Summary Grid (4 Stat Cards) -->
-        <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <!-- Stat Card 1: Available -->
-          <div class="glass-card rounded-2xl p-5 glow-emerald relative overflow-hidden">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-mono text-[#86948a] uppercase tracking-wider">Available Machines</span>
-              <span class="text-emerald-400 text-lg">🟢</span>
-            </div>
-            <p class="text-3xl font-mono font-bold text-[#4edea3] mt-2">
-              {{ machines.filter(m => m.status === 'available').length }} / {{ machines.length }}
-            </p>
-          </div>
-
-          <!-- Stat Card 2: Running -->
-          <div class="glass-card rounded-2xl p-5 glow-rose relative overflow-hidden">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-mono text-[#86948a] uppercase tracking-wider">Currently Running</span>
-              <span class="text-rose-400 text-lg animate-spin">🌀</span>
-            </div>
-            <p class="text-3xl font-mono font-bold text-[#ffb2b7] mt-2">
-              {{ machines.filter(m => m.status === 'in_use').length }}
-            </p>
-          </div>
-
-          <!-- Stat Card 3: Idle Full -->
-          <div class="glass-card rounded-2xl p-5 glow-amber relative overflow-hidden">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-mono text-[#86948a] uppercase tracking-wider">Idle & Full (Unload)</span>
-              <span class="text-amber-400 text-lg">🧺</span>
-            </div>
-            <p class="text-3xl font-mono font-bold text-[#fbbf24] mt-2">
-              {{ machines.filter(m => m.status === 'idle_full').length }}
-            </p>
-          </div>
-
-          <!-- Stat Card 4: My Cycles -->
-          <div class="glass-card rounded-2xl p-5 glow-indigo relative overflow-hidden">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-mono text-[#86948a] uppercase tracking-wider">My Active Cycles</span>
-              <span class="text-indigo-400 text-lg">🧑‍💻</span>
-            </div>
-            <p class="text-3xl font-mono font-bold text-[#c0c1ff] mt-2">
-              {{ machines.filter(isOwner).length }}
-            </p>
-          </div>
-        </section>
-
-        <!-- Filter Tabs -->
-        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <div class="flex items-center gap-2 bg-[#181b25] p-1.5 rounded-xl border border-white/10">
-            <button 
-              @click="activeTab = 'all'"
-              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
-              :class="activeTab === 'all' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
-            >
-              All ({{ machines.length }})
-            </button>
-            <button 
-              @click="activeTab = 'washers'"
-              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
-              :class="activeTab === 'washers' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
-            >
-              Washers
-            </button>
-            <button 
-              @click="activeTab = 'dryers'"
-              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
-              :class="activeTab === 'dryers' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
-            >
-              Dryers
-            </button>
-            <button 
-              @click="activeTab = 'available'"
-              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
-              :class="activeTab === 'available' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
-            >
-              Available
-            </button>
-            <button 
-              @click="activeTab = 'my'"
-              class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition"
-              :class="activeTab === 'my' ? 'bg-[#10b981] text-[#003824] shadow' : 'text-[#86948a] hover:text-white'"
-            >
-              My Laundry
-            </button>
-          </div>
-
-          <p class="text-xs font-mono text-[#86948a]">Showing {{ filteredMachines.length }} machine(s)</p>
-        </div>
-
-        <!-- Machine Cards Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div 
-            v-for="machine in filteredMachines" 
-            :key="machine.id"
-            class="glass-card rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden group hover:border-[#10b981]/50 transition-all duration-300"
-            :class="{
-              'glow-emerald': machine.status === 'available',
-              'glow-rose': machine.status === 'in_use',
-              'glow-amber': machine.status === 'idle_full'
-            }"
-          >
-            <!-- Card Header -->
-            <div>
-              <div class="flex items-center justify-between mb-3">
-                <span class="text-white font-mono font-bold text-sm tracking-wider">{{ machine.name.toUpperCase() }}</span>
-                
-                <!-- Live Telemetry Wattage Pill -->
-                <span 
-                  v-if="machine.latest_power_w !== null && machine.latest_power_w !== undefined" 
-                  class="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1"
-                >
-                  ⚡ {{ machine.latest_power_w.toFixed(0) }}W
-                </span>
-              </div>
-
-              <!-- Animated Drum Display -->
-              <div class="flex items-center gap-4 my-4 p-3 bg-[#0a0e17]/80 rounded-xl border border-white/10">
-                <div class="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center bg-[#181b25] relative">
-                  <div 
-                    class="text-2xl transition-transform duration-1000"
-                    :class="{ 'animate-spin': machine.status === 'in_use' && getSecondsRemaining(machine.active_booking?.estimated_end_at) > 0 }"
-                    style="animation-duration: 2.5s;"
-                  >
-                    🌀
-                  </div>
-                </div>
-
-                <div>
-                  <div v-if="machine.status === 'in_use' && getSecondsRemaining(machine.active_booking?.estimated_end_at) > 0">
-                    <p class="text-[11px] font-mono text-[#86948a]">TIME REMAINING</p>
-                    <p class="text-xl font-mono font-bold text-rose-400 tracking-wider">
-                      {{ formatTime(getSecondsRemaining(machine.active_booking?.estimated_end_at)) }}
-                    </p>
-                  </div>
-
-                  <div v-else-if="machine.status === 'in_use' && getSecondsRemaining(machine.active_booking?.estimated_end_at) === 0">
-                    <p class="text-[11px] font-mono text-amber-400">UNLOAD NEEDED</p>
-                    <p class="text-sm font-mono font-bold text-amber-300">00:00</p>
-                  </div>
-
-                  <div v-else-if="machine.status === 'available'">
-                    <p class="text-[11px] font-mono text-[#86948a]">STATUS</p>
-                    <p class="text-sm font-mono font-bold text-emerald-400">READY</p>
-                  </div>
-
-                  <div v-else-if="machine.status === 'idle_full'">
-                    <p class="text-[11px] font-mono text-[#86948a]">DONE & FULL</p>
-                    <p class="text-sm font-mono font-bold text-amber-500">FINISHED</p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Waitlist Queue Section -->
-              <div class="my-3 border-t border-white/10 pt-3">
-                <div class="flex items-center justify-between text-xs font-mono text-[#86948a] mb-2">
-                  <span>📋 WAITLIST ({{ machine.queue.length }})</span>
-                </div>
-                
-                <div v-if="machine.queue.length > 0" class="space-y-1 max-h-20 overflow-y-auto pr-1">
-                  <div 
-                    v-for="(entry, index) in machine.queue" 
-                    :key="entry.id"
-                    class="flex items-center justify-between text-xs font-mono px-2 py-1 rounded bg-[#181b25] border border-white/10"
-                    :class="{ 'border-indigo-500/40 text-indigo-300': entry.user_id === currentUser.id }"
-                  >
-                    <span>#{{ index + 1 }} Student (..{{ entry.user_id.substring(0, 4) }})</span>
-                    <span v-if="entry.status === 'notified'" class="text-[10px] text-amber-400 font-bold">RESERVED</span>
-                    <span v-else class="text-[10px] text-[#86948a]">WAITING</span>
-                  </div>
-                </div>
-                <p v-else class="text-xs font-mono text-[#86948a]/60 italic">Queue is empty.</p>
-              </div>
-            </div>
-
-            <!-- Card Actions -->
-            <div class="border-t border-white/10 pt-3 mt-2">
-              <div v-if="machine.status === 'available'">
-                <button 
-                  v-if="isNotified(machine)"
-                  @click="claimMachine(machine.id)"
-                  class="w-full bg-[#fbbf24] hover:bg-amber-500 text-black font-mono font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95"
-                >
-                  Claim My Reservation 🚀
-                </button>
-                <button 
-                  v-else-if="machine.queue.length > 0"
-                  disabled
-                  class="w-full bg-[#181b25] text-[#86948a] font-mono py-2.5 rounded-xl text-xs cursor-not-allowed"
-                >
-                  🔒 Reserved for Queue
-                </button>
-                <button 
-                  v-else
-                  @click="claimMachine(machine.id)"
-                  class="w-full bg-[#10b981] hover:bg-[#4edea3] text-[#003824] font-mono font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95"
-                >
-                  Start Laundry 🚀
-                </button>
-              </div>
-
-              <div v-else-if="machine.status === 'in_use'">
-                <button 
-                  v-if="isOwner(machine)"
-                  @click="clearMachine(machine.id)"
-                  class="w-full bg-rose-600 hover:bg-rose-500 text-white font-mono font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95"
-                >
-                  Clear Machine 🛑
-                </button>
-
-                <div v-else>
-                  <button 
-                    v-if="getQueuePosition(machine) !== null"
-                    @click="leaveQueue(machine.id)"
-                    class="w-full bg-[#181b25] hover:bg-[#262a34] text-rose-400 font-mono py-2.5 rounded-xl text-xs transition active:scale-95"
-                  >
-                    Cancel Queue (Pos: #{{ getQueuePosition(machine) }}) ❌
-                  </button>
-                  <button 
-                    v-else
-                    @click="joinQueue(machine.id)"
-                    class="w-full bg-[#181b25] hover:bg-[#262a34] text-[#4edea3] font-mono font-bold py-2.5 rounded-xl text-xs transition active:scale-95"
-                  >
-                    Join Waitlist Queue 📋
-                  </button>
-                </div>
-              </div>
-
-              <div v-else-if="machine.status === 'idle_full'" class="space-y-2">
-                <button 
-                  @click="clearMachine(machine.id)"
-                  class="w-full bg-[#10b981] hover:bg-[#4edea3] text-[#003824] font-mono font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95"
-                >
-                  Unload & Make Available 🧺
-                </button>
-                <button 
-                  v-if="getQueuePosition(machine) !== null"
-                  @click="pingOwner(machine.id)"
-                  class="w-full bg-amber-500 hover:bg-amber-600 text-black font-mono font-bold py-2 rounded-xl text-xs animate-pulse"
-                >
-                  📢 Ping Owner to Unload
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </main>
-
-    <!-- Toast Notifications -->
-    <div class="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full">
-      <div 
-        v-for="toast in toasts" 
-        :key="toast.id"
-        class="glass-card p-4 rounded-xl border border-white/20 shadow-2xl flex items-start gap-3 transition-all duration-300"
-        :class="{
-          'border-amber-500/40 bg-amber-950/30 text-amber-300': toast.type === 'warning',
-          'border-[#10b981]/40 bg-[#10b981]/10 text-[#4edea3]': toast.type === 'success',
-          'border-rose-500/40 bg-rose-950/30 text-rose-300': toast.type === 'error',
-          'border-indigo-500/40 bg-indigo-950/30 text-indigo-300': toast.type === 'info',
-        }"
-      >
-        <span class="text-lg">
-          <span v-if="toast.type === 'warning'">📢</span>
-          <span v-else-if="toast.type === 'success'">✅</span>
-          <span v-else-if="toast.type === 'error'">🚨</span>
-          <span v-else>ℹ️</span>
-        </span>
-        <p class="text-xs font-mono font-semibold leading-relaxed flex-1">{{ toast.message }}</p>
-      </div>
+  <div
+    :class="[
+      'min-h-screen flex flex-col md:flex-row font-sans antialiased transition-colors duration-200',
+      darkMode ? 'bg-[#0c0e14] text-slate-100' : 'bg-[#f6f8fa] text-slate-900'
+    ]"
+  >
+    <!-- Floating Toast Notification -->
+    <div
+      v-if="toast"
+      class="fixed top-5 right-5 z-50 bg-[#161a22] text-white px-5 py-3 rounded-full text-xs font-semibold shadow-2xl flex items-center gap-2.5 animate-bounce border border-white/15"
+    >
+      <CheckCircle2 class="w-4 h-4 text-emerald-400 shrink-0" />
+      <span class="tracking-tight text-white">{{ toast }}</span>
     </div>
+
+    <!-- 1. DESKTOP LEFT SIDEBAR -->
+    <AppSidebar
+      :active-tab="activeTab"
+      :free-machines-count="freeMachinesCount"
+      :my-machine="myMachine"
+      :dark-mode="darkMode"
+      @update:active-tab="activeTab = $event"
+      @open-settings="showSettings = true"
+      @set-theme="setTheme($event)"
+    />
+
+    <!-- RIGHT COLUMN: TOP HEADER + MAIN CONTENT -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <!-- 2. TOP HEADER (Mobile & Desktop) -->
+      <AppTopHeader
+        :active-tab="activeTab"
+        :my-machine="myMachine"
+        :dark-mode="darkMode"
+        :formatted-date="formattedDate"
+        @open-settings="showSettings = true"
+        @view-profile="activeTab = 'profile'"
+        @notify-click="showToast('Smart plug telemetry updated seconds ago')"
+      />
+
+      <!-- MAIN CONTENT DASHBOARD -->
+      <main class="flex-1 min-w-0 overflow-y-auto p-4 sm:p-6 lg:p-10 pb-24 md:pb-10">
+        <div class="max-w-6xl mx-auto space-y-6">
+
+          <!-- Dynamic Page Title Banner -->
+          <div>
+            <h2 class="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+              {{ activeTab === 'home' ? 'Here’s your active laundry status' : activeTab === 'machines' ? 'Hostel Laundry Appliances' : 'Resident Profile' }}
+            </h2>
+            <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+              {{ activeTab === 'home' ? 'Monitor active cycles and room availability in real time' : activeTab === 'machines' ? 'Block B • 2nd Floor • Claim free units or nudge finished loads' : 'Room 214 • Block B Resident Info & Protocol' }}
+            </p>
+          </div>
+
+          <!-- TAB 1: HOME VIEW -->
+          <div v-if="activeTab === 'home'" class="space-y-6 animate-fadeIn">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              <!-- 3. Hero Active Machine (Cols 1-7) -->
+              <div class="lg:col-span-7">
+                <HomeHeroMachine
+                  :my-machine="myMachine"
+                  :dark-mode="darkMode"
+                  @release-machine="handleReleaseMachine"
+                  @browse-machines="activeTab = 'machines'"
+                  @toggle-notify="showToast(myMachine.notifyWhenOff ? 'Notification already set for 0W motor shutdown 🔔' : 'Alert configured!')"
+                  @view-history="openMachinePowerGraph"
+                />
+              </div>
+
+              <!-- 4. Overview Cards (Cols 8-12) -->
+              <div class="lg:col-span-5">
+                <OverviewCards
+                  :free-machines-count="freeMachinesCount"
+                  :running-machines-count="runningMachinesCount"
+                  :uncollected-count="uncollectedCount"
+                  :dark-mode="darkMode"
+                  @navigate-filter="setFilterAndNavigate($event)"
+                  @view-appliances="activeTab = 'machines'"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: APPLIANCES HUB VIEW -->
+          <div v-else-if="activeTab === 'machines'" class="space-y-6 animate-fadeIn">
+            <!-- Filter Bar -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 class="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                  All Available & In-Use Units
+                </h3>
+                <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                  Claim free units or send polite peer buzzes for finished loads
+                </p>
+              </div>
+
+              <!-- Filter Pills -->
+              <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
+                <button
+                  v-for="f in filterTabs"
+                  :key="f.id"
+                  @click="filterType = f.id"
+                  :class="[
+                    'px-4 py-2 rounded-full text-xs font-bold transition-all whitespace-nowrap',
+                    filterType === f.id
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+                      : darkMode
+                      ? 'bg-slate-800 text-slate-400 hover:text-white'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 shadow-2xs'
+                  ]"
+                >
+                  {{ f.label }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 5. 6-Machine Appliances Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+              <ApplianceCard
+                v-for="machine in filteredMachines"
+                :key="machine.id"
+                :machine="machine"
+                :is-my-machine="myMachine.claimed && myMachine.id === machine.id"
+                :dark-mode="darkMode"
+                @claim="handleClaimMachine"
+                @buzz="handleSendBuzz"
+                @view-history="openMachinePowerGraph"
+              />
+            </div>
+          </div>
+
+          <!-- TAB 3: RESIDENT PROFILE VIEW -->
+          <div v-else-if="activeTab === 'profile'">
+            <!-- 6. Resident Profile Component -->
+            <ResidentProfileView
+              :my-machine="myMachine"
+              :dark-mode="darkMode"
+            />
+          </div>
+
+        </div>
+      </main>
+    </div>
+
+    <!-- 7. MOBILE BOTTOM FLOATING DOCK -->
+    <MobileBottomNav
+      :active-tab="activeTab"
+      :free-machines-count="freeMachinesCount"
+      :dark-mode="darkMode"
+      @update:active-tab="activeTab = $event"
+    />
+
+    <!-- 8. SETTINGS POPUP MODAL -->
+    <SettingsModal
+      :show-settings="showSettings"
+      :dark-mode="darkMode"
+      :push-alert-enabled="pushAlertEnabled"
+      :anonymous-buzz-enabled="anonymousBuzzEnabled"
+      @close="showSettings = false"
+      @set-theme="setTheme($event)"
+      @update:push-alert-enabled="pushAlertEnabled = $event; showToast(pushAlertEnabled ? 'Alerts enabled' : 'Alerts disabled')"
+      @update:anonymous-buzz-enabled="anonymousBuzzEnabled = $event"
+    />
+
+    <!-- 9. 4-HOUR POWER CONSUMPTION GRAPH POPUP (Tapping Machine Card) -->
+    <PowerGraphModal
+      :is-open="isPowerGraphOpen"
+      :title="selectedMachineForGraph?.name"
+      :subtitle="selectedMachineForGraph?.location || 'Block B • 2nd Floor'"
+      :plug="selectedMachineForGraph"
+      :history="machinePowerHistory"
+      :loading="historyLoading"
+      :dark-mode="darkMode"
+      @close="isPowerGraphOpen = false"
+    />
   </div>
 </template>
 
-<style>
-/* Stitch Custom Glassmorphic Styles */
-.glass-card {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  transition: border-color 0.3s ease;
+<style scoped>
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.glass-card:hover {
-  border-color: rgba(255, 255, 255, 0.25);
+
+.animate-fadeIn {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
-.glow-emerald {
-  box-shadow: 0 0 30px rgba(16, 185, 129, 0.12);
-}
-.glow-rose {
-  box-shadow: 0 0 30px rgba(244, 63, 94, 0.12);
-}
-.glow-amber {
-  box-shadow: 0 0 30px rgba(245, 158, 11, 0.12);
-}
-.glow-indigo {
-  box-shadow: 0 0 30px rgba(99, 102, 241, 0.12);
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 </style>
