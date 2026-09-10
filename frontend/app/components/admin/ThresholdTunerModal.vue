@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { Sliders, Sparkles, Check, Info } from 'lucide-vue-next'
+import { Sliders, Sparkles, Check, Info, Download } from 'lucide-vue-next'
 
 const props = defineProps({
   isOpen: {
@@ -119,6 +119,37 @@ const runAutoCalibrate = () => {
 
 const handleSimulateCycle = () => {
   emit('simulate-cycle', props.plug?.id)
+}
+
+// 1-Click Export Calibration & History Dataset to CSV / Excel
+const exportToCsv = () => {
+  if (!props.history?.series || props.history.series.length === 0) {
+    alert('No telemetry data available on graph to export.')
+    return
+  }
+
+  const series = props.history.series
+  const headers = ['Timestamp_ISO', 'Power_Watts', 'Voltage_Volts', 'Current_mA', 'Source']
+  const rows = series.map(pt => [
+    pt.timestamp,
+    pt.power_w ?? '',
+    pt.voltage_v ?? '',
+    pt.current_ma ?? '',
+    pt.source ?? 'local'
+  ])
+
+  const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const safeName = (props.plug?.name || 'calibration').toLowerCase().replace(/[^a-z0-9]/g, '_')
+  const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  link.setAttribute('href', url)
+  link.setAttribute('download', `${safeName}_telemetry_dataset_${dateStr}.csv`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 // Watch plug prop to initialize values
@@ -341,7 +372,16 @@ const handleSave = async () => {
               title="Inject a realistic synthetic wash cycle to test the tuner without running physical appliances"
             >
               <span>🧪</span>
-              <span>Simulate Test Cycle</span>
+              <span>Simulate Cycle</span>
+            </button>
+            <button
+              type="button"
+              @click="exportToCsv"
+              class="px-2.5 py-1 text-[11px] font-mono font-bold rounded-xl border transition flex items-center gap-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 active:scale-95 shadow-xs"
+              title="Download full telemetry readings on this graph as CSV / Excel spreadsheet"
+            >
+              <Download class="w-3.5 h-3.5" />
+              <span>Export CSV</span>
             </button>
           </div>
         </div>

@@ -169,6 +169,28 @@ This document outlines the milestones and key checkpoints for developing, valida
 - [x] Consolidate user authentication and role-based routing through the unified `/login` portal.
 - [x] Verify production build (`npm run build` exit code 0).
 
+## Milestone 25: Washing Machine Telemetry Logging, Machine Archetypes, SQLite WAL & Visual Calibration Studio
+- [x] Discovered, authenticated, and onboarded smart plug `d7fa4d27a2883bb4feqvhl` (`Washer 1 Smart Plug` at `192.168.1.15`).
+- [x] Resolved Windows multi-homed / Tailscale route metric 0 packet collision by implementing automatic local subnet interface binding in `TuyaLocalProvider`.
+- [x] Standardized power & voltage scaling to align with Tuya hardware specifications (0.1W and 0.1V units).
+- [x] Enabled SQLite Write-Ahead Logging (`PRAGMA journal_mode=WAL`) and `synchronous=NORMAL` on `washqueue.db` for crash-resilient persistence and non-blocking concurrent reads/writes.
+- [x] Built comprehensive CLI Telemetry & Tuning suite:
+  - `record_telemetry.py`: 1-second high-density logger with live terminal monitor, cycle stage detection, and auto-tuning calibration report.
+  - `simulate_wash_cycle.py`: Generates authentic multi-stage washing machine profiles into database and CSV for instant testing.
+  - `tune_from_csv.py`: Offline benchmark tool for testing threshold combinations against any saved CSV run.
+  - `export_telemetry.py`: Dumps stored time-series telemetry from SQLite to CSV/JSON.
+  - `run_background_logger.py`: Headless background daemon for continuous passive logging.
+- [x] Built Backend Endpoints for Visual Studio:
+  - `POST /api/smart-plugs/{id}/auto-calibrate`: Automatic historical curve analyzer calculating baseline idle, soak pause, and recommended thresholds.
+  - `POST /api/smart-plugs/{id}/simulate-cycle`: Injects a synthetic 25-minute test wash cycle into the database for immediate testing.
+- [x] Upgraded `<ThresholdTunerModal>` in Admin Panel:
+  - Added **⚡ Auto-Detect from Graph** button for 1-click automatic threshold discovery.
+  - Added **🧪 Simulate Test Cycle** button for testing without physical machines.
+  - Expanded to **6 real-world appliance profile presets** (Top-Load Deep Soak, Front-Load Inverter DD, Front-Load Heated, Compact Washer, Commercial Dryer, Custom).
+  - Maintained interactive drag-and-drop horizontal threshold guide lines directly on the SVG power canvas.
+- [x] Verified complete backend and frontend production builds (0 errors).
+
+
 
 
 

@@ -66,23 +66,28 @@ Headers:
 
 ---
 
-## 4. Visual Threshold Calibration Studio (For Non-Tech Admins)
+## 4. Visual Threshold Calibration Studio (Web UI)
 
-To allow non-technical hostel wardens and administrative staff to tune power thresholds without understanding raw code or electrical engineering formulas, WashQueue provides an **Interactive Graph & WebSocket Threshold Calibration Studio**:
+To allow non-technical hostel wardens and administrative staff to tune power thresholds without raw code or electrical engineering knowledge, WashQueue provides an **Interactive Graph & WebSocket Threshold Calibration Studio** directly in the Admin Panel (`/admin` -> **IoT & Smart Plugs** -> **Visual Calibration Studio**):
 
-### 1-Click Appliance Presets
-* 🌊 **Front-Load Eco Washer**: Running Cutoff: `8.0W`, Soak/Pause Cutoff: `3.5W`, Debounce Soak: `90s`.
-* 🌀 **Top-Load Heavy Washer**: Running Cutoff: `15.0W`, Soak/Pause Cutoff: `6.0W`, Debounce Soak: `150s`.
-* 💨 **Commercial Drum Dryer**: Running Cutoff: `25.0W`, Soak/Pause Cutoff: `10.0W`, Debounce Soak: `60s`.
-* ⚡ **Custom Calibration**: Fine-tune via sliders or direct on-chart drag handles.
+### 1-Click Appliance Profile Presets
+* 🌀 **Top-Load (Deep Soak)**: Running Cutoff: `12.0W`, Soak/Pause Cutoff: `4.0W`, Debounce Soak: `240s` (4-min buffer prevents false completion alerts during long agitation pauses).
+* 🌊 **Front-Load Inverter DD**: Running Cutoff: `8.0W`, Soak/Pause Cutoff: `3.5W`, Debounce Soak: `90s` (optimized for smooth sinusoidal tumbling direct-drive motors).
+* 🔥 **Front-Load Heated (Steam)**: Running Cutoff: `10.0W`, Soak/Pause Cutoff: `4.0W`, Debounce Soak: `120s` (handles high-power internal water heater plates up to 2200W).
+* ⚡ **Compact / Quick Wash**: Running Cutoff: `6.0W`, Soak/Pause Cutoff: `2.5W`, Debounce Soak: `60s` (low-draw mini washers & short 15-min cycles).
+* 💨 **Commercial Drum Dryer**: Running Cutoff: `25.0W`, Soak/Pause Cutoff: `10.0W`, Debounce Soak: `60s` (high-power continuous tumbling commercial dryers).
+* 🛠️ **Custom Tuning**: Fine-tune via sliders or direct on-chart drag handles.
 
-### Interactive SVG Chart & Colored Zones
+### Interactive SVG Chart & Smart Features
+* **⚡ Auto-Detect from Graph**: Scans the loaded 4-hour telemetry curve, measures baseline standby wattage, detects the longest soak pause, snaps the sliders to the optimal values, and displays the detected machine archetype badge!
+* **🧪 Simulate Test Cycle**: Injects a synthetic 25-minute wash cycle into the database in 1 click, instantly populating the graph for testing without running physical appliances.
 * **🟢 Active Wash Zone (Emerald Background)**: $[ \text{Running Cutoff}, \text{Max Power} ]$ $\rightarrow$ Status: `in_use`.
 * **🟡 Soak / Pause Zone (Amber Background)**: $[ \text{Idle Cutoff}, \text{Running Cutoff} ]$ $\rightarrow$ Status: `soak` (starts debounce timer).
 * **⚪ Standby / Empty Zone (Dark Background)**: $[ 0, \text{Idle Cutoff} ]$ $\rightarrow$ Status: `available`.
-* **Draggable Guide Lines**: Non-tech admins can drag horizontal threshold lines up or down directly on the live power curve.
+* **Draggable Guide Lines**: Admins can drag horizontal dotted threshold lines (Green `RUN` and Amber `SOAK`) up or down directly on the live power curve.
+* **Hostel-Wide Propagation**: Checkbox *"Apply this calibration to all similar machines in this hostel"* batch-updates similar washers across the building.
 
-### Calibration Update Endpoint
+### Calibration Endpoints
 ```http
 PATCH /api/smart-plugs/{id}/calibration
 Headers:
@@ -90,45 +95,116 @@ Headers:
 Content-Type: application/json
 
 {
-  "power_threshold_running": 12.5,
-  "power_threshold_idle": 4.5,
-  "debounce_seconds": 120,
+  "power_threshold_running": 12.0,
+  "power_threshold_idle": 4.0,
+  "debounce_seconds": 180,
   "apply_to_similar_machines": true
 }
 ```
 
+```http
+POST /api/smart-plugs/{id}/auto-calibrate?apply=false
+Headers:
+  X-Admin-PIN: 1234
+```
+
+```http
+POST /api/smart-plugs/{id}/simulate-cycle?minutes=25
+Headers:
+  X-Admin-PIN: 1234
+```
+
 ---
 
-## 5. Remote Relay Switching
+## 5. Washing Machine Power Profiles & Archetypes
+
+Different washing machine mechanisms produce vastly different electrical power signatures. Understanding these archetypes is critical for accurate inference:
+
+| Machine Archetype | Example Models | Power Curve Characteristics | Key Gotcha & Tuning Rule |
+| :--- | :--- | :--- | :--- |
+| **Top-Load Pulsator** | IFB, Samsung, Whirlpool Top-Loads | Sharp, high-frequency pulses (180W–320W bursts every 2s) as agitator oscillates. | **Deep soak pauses (3–10 minutes at 0–2W)**. `debounce_seconds` must be set to **180s–300s** so soak pauses aren't mistaken for cycle completion. |
+| **Front-Load Inverter DD** | LG AI DirectDrive, Bosch Serie 6 | Smooth sinusoidal power ramp (100W–250W); gentle drum reversals; spin cycle ramps to 450W–650W. | Shorter rest intervals (20s–60s). `debounce_seconds` of **90s–120s** is ideal. |
+| **Front-Load with Heater** | Any washer running Hot/Steam wash | Wash agitation interrupted by a **sustained 1800W–2200W plateau** for 15–25 minutes. | High peak power; standard pauses. Set `running` at **10W**, `debounce` at **120s**. |
+| **Commercial / Laundromat** | Speed Queen, Maytag Commercial | Continuous motor hum, fast mechanical timer, violent drainage/spin. | Minimal pauses (<45s). Lower debounce (**60s–90s**) allows faster machine turnover. |
+
+---
+
+## 6. Telemetry Logging, Simulation & Tuning Suite (CLI)
+
+For developers and power users, WashQueue provides dedicated command-line utilities in `backend/scripts/`:
+
+### A. Live Cycle Recorder & Auto-Tuner (`record_telemetry.py`)
+```powershell
+python scripts/record_telemetry.py --machine "Washer 1" --interval 1.0
+```
+* Polls local LAN socket every 1s (<20ms latency).
+* Streams real-time console dashboard (Timestamp, Watts, Volts, Current, Inferred State).
+* Simultaneously writes high-res data to `telemetry_logs/telemetry_washer_1_<timestamp>.csv` and `washqueue.db`.
+* On <kbd>Ctrl</kbd>+<kbd>C</kbd>, generates full cycle report (peak spin power, baseline standby, longest soak pause) and auto-updates the plug's thresholds in the database.
+
+### B. Synthetic Cycle Simulator (`simulate_wash_cycle.py`)
+```powershell
+python scripts/simulate_wash_cycle.py --minutes 30
+```
+* Generates a complete physics-based washing machine power profile (fill, agitation, soak pause, rinse, spin, standby) into `washqueue.db` and CSV in ~5 seconds.
+* Tests candidate thresholds against the synthetic dataset and flags premature soak triggers.
+
+### C. Offline CSV Benchmark Tuner (`tune_from_csv.py`)
+```powershell
+python scripts/tune_from_csv.py --csv telemetry_logs/my_cycle.csv --debounce 180
+```
+* Replays any past recorded wash run from CSV without running physical appliances.
+* Evaluates state machine transitions and verifies zero false-positive completions.
+
+### D. Historical Telemetry Exporter (`export_telemetry.py`)
+```powershell
+python scripts/export_telemetry.py --device-id d7fa4d27a2883bb4feqvhl --hours 24 --format csv
+```
+* Dumps stored time-series readings from SQLite (`washqueue.db`) to CSV or JSON.
+
+### E. Continuous Background Logger Daemon (`run_background_logger.py`)
+```powershell
+python scripts/run_background_logger.py --interval 2.0
+```
+* Passive headless daemon that continuously logs live smart plug telemetry into `washqueue.db`.
+
+---
+
+## 7. Database Persistence & Network Architecture
+
+### SQLite WAL Mode (Write-Ahead Logging)
+* `backend/washqueue.db` operates in **WAL mode** (`PRAGMA journal_mode=WAL`) with `PRAGMA synchronous=NORMAL`.
+* Guarantees atomic disk commits across sudden power cuts or process stops.
+* Allows high-frequency 1s telemetry writes while the web server and admin portal execute concurrent analytical reads with zero database lock contention.
+
+### Subnet Interface Auto-Binding (Multi-Homed / VPN Robustness)
+* Windows machines with active VPNs (such as **Tailscale**) frequently advertise route metrics of `0` for `192.168.1.0/24`, causing default OS sockets to route local LAN packets into the virtual VPN interface.
+* [`TuyaLocalProvider`](file:///d:/lab/projects/washqueue/backend/app/smart_plug_providers/tuya_local.py) automatically identifies the local physical NIC matching the plug's subnet (`192.168.1.12`) and binds before connecting, ensuring 100% reliable <20ms local communication.
+
+---
+
+## 8. Remote Relay Switching
 
 Operators can turn the smart plug ON or OFF remotely via the Admin dashboard or REST API:
 
-### Endpoint
 ```http
 POST /api/smart-plugs/{id}/switch?on=true
 Headers:
   X-Admin-PIN: 1234
 ```
 
-### Switching Mechanics
-1. **Local Socket First**: Attempts to send `turn_on()` / `turn_off()` over the local TCP socket.
-2. **Cloud API Fallback**: If local socket is unreachable, immediately dispatches the command via Tuya Cloud API payload:
-   ```json
-   {
-     "commands": [
-       { "code": "switch_1", "value": true }
-     ]
-   }
-   ```
-3. **Optimistic UI Update**: The admin button (`⚡ SWITCH ON` <-> `⚪ SWITCH OFF`) updates instantly in local state upon confirmation.
+1. **Local Socket First**: Sends `turn_on()` / `turn_off()` over direct LAN socket.
+2. **Cloud API Fallback**: If local socket is unreachable, dispatches the command via Tuya OpenAPI.
+3. **Optimistic UI Update**: Button state updates instantly upon confirmation.
 
 ---
 
-## 6. Power State Inference & Debounce Logic
+## 9. Power State Inference & Debounce Logic
 
 | Detected Power Draw | Inferred Machine State | Description |
 | :--- | :--- | :--- |
 | **`>= Running Threshold`** (e.g. 10W) | `in_use` | Motor / drum is actively spinning or heating. |
-| **`< Running & >= Idle`** (e.g. 5W-10W) | *Debouncing...* | Machine is soaking or in a pause phase. Starts soak debounce timer. |
+| **`< Running & >= Idle`** (e.g. 4W–10W) | *Debouncing...* | Machine is in soak or rest phase. Soak debounce timer starts. |
 | **`< Idle` for >= Debounce Duration** | `idle_full` | Wash cycle completed. Machine is full and waiting to be emptied. |
-| **User clears machine** | `available` | Laundry removed; machine is empty and ready for the next student. |
+| **User clears machine** | `available` | Laundry removed; machine is empty and ready for next resident. |
+

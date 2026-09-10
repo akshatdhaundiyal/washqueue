@@ -75,20 +75,29 @@ For database portal documentation, see [docs/database_portal.md](docs/database_p
 - **Public Dashboard (`/`)**: Displays anonymized status (**`"Occupied by Resident"`**) to protect privacy while showing live cycle progress and power state.
 - **Operator Console (`/admin`)**: Unmasks exact student identities (**Name**, **Room Number**, **Start Time**) for management auditing.
 
-### 9. Smart Plug Telemetry & 4-Hour Power Graph
+### 9. Smart Plug Telemetry & Visual Threshold Calibration Studio
 - **Card-Tap Resident Telemetry**: Tapping any washing machine card on the student dashboard pops up its **4-hour historical power consumption curve**.
-- **Dynamic Wall-Clock X-Axis**: Displays actual formatted local time labels (`HH:mm`, e.g. `08:30 (-4h)`, `09:30 (-3h)`, `10:30 (-2h)`, `11:30 (-1h)`, `12:30 (Live)`) with vertical time grid lines.
-- **Public History API**: `GET /api/machines/{id}/power-history?hours=4` returns chronological power telemetry without requiring an admin PIN.
+- **Visual Threshold Calibration Studio (Admin UI)**:
+  - Accessible via `/admin` -> **IoT & Smart Plugs** -> **Visual Calibration Studio**.
+  - **⚡ Auto-Detect from Graph**: 1-click automatic analysis of the power curve—calculates baseline standby wattage, detects soak pauses, and snaps thresholds to optimal values.
+  - **🧪 Simulate Test Cycle**: Injects a synthetic 25-minute wash cycle directly into the database in 1 click for instant algorithm testing without running physical appliances.
+  - **6 Appliance Profile Presets**: Pre-configured profiles for **Top-Load Pulsator (Deep Soak)**, **Front-Load Inverter DD**, **Front-Load Heated (Steam)**, **Compact Washer**, **Commercial Dryer**, and **Custom Tuning**.
+  - **Interactive Drag-and-Drop SVG Chart**: Drag horizontal threshold lines directly on the live curve to adjust active motor cutoff and soak idle cutoff.
 - **Dual-Series Curves**:
-  - **🟢 Local LAN / WebSocket (`#10b981`)**: Smooth solid emerald gradient curve for ~1-second high-density local telemetry.
+  - **🟢 Local LAN / WebSocket (`#10b981`)**: Smooth solid emerald gradient curve for ~1-second high-density local telemetry (<20ms latency).
   - **🔷 Tuya Cloud Fallback (`#06b6d4`, `◆`)**: Cyan diamond point markers and dashed connector lines.
-- **Instant Hover Readout**: Hovering any point on the SVG chart displays exact timestamp, Watts, Volts, and telemetry source (`● LOCAL_WS` vs `◆ TUYA_CLOUD`).
-- **Offline Simulation**: Automatically generates a realistic 4-hour cycle curve (motor agitation, soak pauses, high-speed spin, cooldown) for demo machines or when smart plugs are offline.
+- **Subnet Interface Auto-Binding**: Intelligent local NIC auto-discovery bypasses VPN / Tailscale route metric overrides.
+- **Crash-Resilient Persistence**: Primary database (`washqueue.db`) runs in SQLite **WAL mode** (`journal_mode=WAL`), ensuring atomic disk sync and concurrent non-blocking reads/writes.
 
-### 10. Strict Role-Based Architecture & Authentication
+### 10. CLI Telemetry Logging & Algorithm Tuning Suite
+- **`record_telemetry.py`**: High-frequency 1s telemetry recorder that streams live metrics, logs to CSV & SQLite, and auto-calibrates thresholds upon cycle completion.
+- **`simulate_wash_cycle.py`**: Synthetic cycle generator creating realistic physics-based power curves for multi-stage washers.
+- **`tune_from_csv.py`**: Offline replay tool to benchmark debounce and threshold combinations against any saved CSV run.
+- **`export_telemetry.py`**: Quick dump tool for exporting historical SQLite telemetry to CSV or JSON.
+
+### 11. Strict Role-Based Architecture & Authentication
 - **Unified Login Portal (`/login`)**: Single authentic point of entry for residents (Student ID / Room Number) and operators (Admin PIN).
-- **Zero Prototype Clutter**: Eliminated redundant developer toggle buttons (`"Admin Console"` link removed from student navigation, `"Resident Hub"` link removed from operator console).
-- **Resident Navigation**: 100% focused on student laundry workflows (**Home Status**, **Appliances Hub**, **Resident Profile**, **Settings**) with an authentic `<LogOut />` button attached to the Resident Profile card.
+- **Zero Prototype Clutter**: Clean navigation separation—student interface focused on laundry workflows with `<LogOut />`, operator console dedicated to IoT fleet management and institutional controls.
 - **Operator Console**: Exclusively dedicated to hostel fleet management, IoT telemetry, database inspection, and institutional identity, protected by a secure **`Lock Admin Session`** control.
 
 ---

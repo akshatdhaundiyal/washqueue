@@ -59,6 +59,29 @@ const setQueryTemplate = (sql) => {
 const onRunQueryClick = () => {
   emit('run-query', localSqlQuery.value)
 }
+
+// Export SQL Query Results to CSV / Excel
+const exportCsv = () => {
+  if (!props.queryResult?.rows?.length || !props.queryResult?.columns?.length) return
+  const cols = props.queryResult.columns
+  const rows = props.queryResult.rows.map(r => cols.map(c => {
+    const val = r[c]
+    if (val === null || val === undefined) return '""'
+    const str = String(val).replace(/"/g, '""')
+    return `"${str}"`
+  }))
+  const csv = [cols.map(c => `"${c}"`).join(','), ...rows.map(r => r.join(','))].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  a.href = url
+  a.download = `query_result_${ts}.csv`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 </script>
 
 <template>
@@ -280,6 +303,16 @@ const onRunQueryClick = () => {
             Allowed: <code class="text-emerald-500">SELECT</code>, <code class="text-emerald-500">WITH</code>, <code class="text-emerald-500">PRAGMA</code>, <code class="text-emerald-500">EXPLAIN</code>
           </span>
           <div class="flex items-center gap-2">
+            <button
+              v-if="queryResult?.rows?.length"
+              @click="exportCsv"
+              class="px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition flex items-center gap-1.5"
+              :class="darkMode ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'"
+              title="Download SQL query output as Excel/CSV file"
+            >
+              <Download class="w-3.5 h-3.5" />
+              <span>Export CSV</span>
+            </button>
             <button
               v-if="queryResult?.rows?.length"
               @click="emit('export-json')"

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { Download } from 'lucide-vue-next'
 
 const props = defineProps({
   isOpen: {
@@ -35,6 +36,37 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const hoveredPointIndex = ref(null)
+
+// 1-Click Export to CSV / Excel spreadsheet
+const exportToCsv = () => {
+  if (!props.history?.series || props.history.series.length === 0) {
+    alert('No telemetry data available to export.')
+    return
+  }
+
+  const series = props.history.series
+  const headers = ['Timestamp_ISO', 'Power_Watts', 'Voltage_Volts', 'Current_mA', 'Source']
+  const rows = series.map(pt => [
+    pt.timestamp,
+    pt.power_w ?? '',
+    pt.voltage_v ?? '',
+    pt.current_ma ?? '',
+    pt.source ?? 'local'
+  ])
+
+  const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const safeName = (props.title || props.plug?.name || 'washqueue').toLowerCase().replace(/[^a-z0-9]/g, '_')
+  const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  link.setAttribute('href', url)
+  link.setAttribute('download', `${safeName}_telemetry_${dateStr}.csv`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
 
 // 4-Hour Wall-Clock Time Ticks on X-Axis
 const timeTicks = computed(() => {
@@ -126,13 +158,25 @@ const graphMetrics = computed(() => {
           </h3>
         </div>
 
-        <button 
-          @click="emit('close')" 
-          class="p-2 rounded-xl border transition"
-          :class="darkMode ? 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800' : 'border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100'"
-        >
-          ✕
-        </button>
+        <div class="flex items-center gap-2 self-end sm:self-auto">
+          <button 
+            type="button"
+            @click="exportToCsv"
+            class="px-3 py-1.5 rounded-xl border text-xs font-mono font-bold transition flex items-center gap-1.5 active:scale-95 shadow-xs"
+            :class="darkMode ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25' : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'"
+            title="Download full time-series readings as CSV / Excel spreadsheet"
+          >
+            <Download class="w-3.5 h-3.5" />
+            <span>Export CSV</span>
+          </button>
+          <button 
+            @click="emit('close')" 
+            class="p-2 rounded-xl border transition"
+            :class="darkMode ? 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800' : 'border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100'"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       <!-- 4-Card Summary Metrics -->
