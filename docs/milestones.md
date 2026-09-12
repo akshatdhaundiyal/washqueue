@@ -201,6 +201,35 @@ This document outlines the milestones and key checkpoints for developing, valida
 - [x] Built Smart Dual-Mode into CLI Utilities (`read_plug.py` & `record_telemetry.py`): Automatically checks for running FastAPI backend and streams from local API/WebSocket to eliminate port 6668 competition.
 - [x] Created and verified automated test suite in `backend/tests/test_socket_resilience.py` (7 tests, 100% pass).
 
+## Milestone 27: Hostel Local Timezone Localization & 12h/24h Display Engine
+- [x] Build system-wide timezone formatting architecture converting UTC ISO timestamps (`Z`) to local hostel timezone (default: `Asia/Kolkata` - Indian Standard Time).
+- [x] Create `useAppTimezone()` frontend composable with reactive `formatDateTime()`, `formatTime()`, `formatDate()`, and 12-hour AM/PM vs 24-hour military clock display preference toggle.
+- [x] Build Timezone & Clock Configuration Card in Operator Console Tab 4 (`UsersSettingsTab.vue`) allowing admins to select campus timezones and toggle time formatting.
+- [x] Apply reactive timezone formatting across both Resident Hub (`AppTopHeader.vue`, `HomeHeroMachine.vue`, `ApplianceCard.vue`, `PowerGraphModal.vue`) and Operator Console (`FleetTab.vue`, `IotTab.vue`, `UsersSettingsTab.vue`, `DatabasePortalTab.vue`).
+- [x] Verify timezone formatting in automated scripts and visual browser sessions.
+
+## Milestone 28: Dynamic 1-Minute Rotating Cryptographic QR Code Station & Clean Onboarding
+- [x] Eliminate all dummy demo credentials, "One-Tap Demo" buttons, and mock cascading university dropdowns.
+- [x] Implement HMAC-SHA256 physical kiosk registration token generation in `qr_service.py` with 60-second rotation:
+  $$\text{Token} = \text{hostel\_id} \,.\, \text{timestamp} \,.\, \text{nonce} \,.\, \text{HMAC}_{24}(\dots)$$
+- [x] Implement a 360-second verification window (60s rotation on kiosk + 300s grace window once opened on student's mobile browser).
+- [x] Add protected admin endpoints `GET /api/admin/onboarding-qr` (`X-Admin-PIN` required) and public verification endpoint `POST /api/admin/onboarding-qr/verify`.
+- [x] Build dedicated Fullscreen Tablet Kiosk Mode (`AdminQrKioskModal.vue`) with high-contrast vector SVG QR code, circular countdown progress ring, and hostel branding.
+- [x] Build "Hostel Desk QR Required" guidance view on `/login` preventing unverified signups while allowing existing residents to log in normally.
+- [x] Display active 5-minute grace countdown timer and emerald "Hostel Desk Scan Verified" badge on student registration form.
+
+## Milestone 29: Student Registration Request & Administrator Approval Workflow
+- [x] Extend `User` model with `phone: str | None`, `status: str` (`"pending"` | `"approved"` | `"rejected"`), and `approved_at: datetime | None`.
+- [x] Implement dynamic column migration `migrate_user_columns()` in `backend/app/main.py` for automated schema upgrading without data loss.
+- [x] Enforce `status = "pending"` upon student registration in `POST /api/auth/register`.
+- [x] Block sign-in attempts in `POST /api/auth/login` with HTTP 403 Forbidden for unapproved accounts with clear guidance messages.
+- [x] Implement administrative approval endpoints in `routers/admin.py`: `GET /api/admin/pending-registrations`, `POST /api/admin/registrations/{id}/approve`, and `POST /api/admin/registrations/{id}/reject`.
+- [x] Build live `PENDING_REGISTRATION_REQUESTS` queue card in Operator Console (`UsersSettingsTab.vue`) showing applicant name, room, mobile, and localized submission timestamp with 1-click Approve and Reject buttons.
+- [x] Add status column with styled pill badges (`APPROVED`, `PENDING`, `REJECTED`) in the registered resident accounts table.
+- [x] Implement confirmation screen on student login portal with guidance to await administrative approval.
+- [x] Verify approval flow end-to-end via automated integration script and visual browser recording.
+
+
 
 
 

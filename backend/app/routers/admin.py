@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,9 +9,12 @@ try:
     from app.database import get_db
     from app.middleware.auth import require_admin_pin
     from app.config import settings
+    from app.qr_service import generate_registration_token, verify_registration_token, get_lan_ip
     from app.schemas import (
         PinVerifyRequest, UserResponse, AdminMachineDetailResponse,
-        AdminBookingResponse, AdminQueueResponse, SmartPlugResponse, TelemetryReadingResponse
+        AdminBookingResponse, AdminQueueResponse, SmartPlugResponse, TelemetryReadingResponse,
+        SystemSettingsResponse, SystemSettingsUpdateRequest,
+        OnboardingQrResponse, VerifyQrRequest
     )
     from app.repositories import (
         MachineRepository, BookingRepository, QueueRepository,
@@ -19,9 +24,12 @@ except ImportError:
     from ..database import get_db
     from ..middleware.auth import require_admin_pin
     from ..config import settings
+    from ..qr_service import generate_registration_token, verify_registration_token, get_lan_ip
     from ..schemas import (
         PinVerifyRequest, UserResponse, AdminMachineDetailResponse,
-        AdminBookingResponse, AdminQueueResponse, SmartPlugResponse, TelemetryReadingResponse
+        AdminBookingResponse, AdminQueueResponse, SmartPlugResponse, TelemetryReadingResponse,
+        SystemSettingsResponse, SystemSettingsUpdateRequest,
+        OnboardingQrResponse, VerifyQrRequest
     )
     from ..repositories import (
         MachineRepository, BookingRepository, QueueRepository,
@@ -205,4 +213,120 @@ async def execute_database_query(req: DatabaseQueryRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# ==========================================
+# System Settings & Timezone Endpoints
+# ==========================================
+
+@router.get("/settings", response_model=SystemSettingsResponse)
+async def get_admin_system_settings():
+    """Retrieve system timezone and clock settings."""
+    return SystemSettingsResponse(
+        timezone=settings.timezone,
+        default_timezone="Asia/Kolkata",
+        server_time_utc=datetime.now(timezone.utc)
+    )
+
+@router.post("/settings", dependencies=[Depends(require_admin_pin)])
+async def update_admin_system_settings(req: SystemSettingsUpdateRequest):
+    """Update system timezone (Admin only)."""
+    try:
+        import zoneinfo
+        zoneinfo.ZoneInfo(req.timezone)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid IANA timezone identifier: '{req.timezone}'"
+        )
+    settings.timezone = req.timezone
+    return {
+        "status": "success",
+        "timezone": settings.timezone,
+        "message": f"System timezone successfully set to {settings.timezone}"
+    }
+
+# ==========================================
+# 1-Minute Rotating Onboarding QR Endpoints
+# ==========================================
+
+@router.get("/onboarding-qr", response_model=OnboardingQrResponse, dependencies=[Depends(require_admin_pin)])
+async def get_onboarding_qr(hostel_id: str = "block-b", base_url: str = None):
+    """
+    Generates a 60-second rotating cryptographic registration token.
+    Used for front-desk kiosk screens and admin QR stations.
+    """
+    lan_ip = get_lan_ip()
+    token_data = generate_registration_token(hostel_id=hostel_id, ttl_seconds=60)
+    
+    # Base URL defaults to detected LAN IP on port 3000 unless specified
+    resolved_base = base_url.rstrip("/") if base_url else f"http://{lan_ip}:3000"
+    reg_url = f"{resolved_base}/login?mode=register&token={token_data['token']}&hostel={hostel_id}"
+
+    return OnboardingQrResponse(
+        token=token_data["token"],
+        hostel_id=hostel_id,
+        ttl_seconds=60,
+        expires_at=token_data["expires_at"],
+        lan_ip=lan_ip,
+        default_url=reg_url
+    )
+
+@router.post("/onboarding-qr/verify")
+async def verify_onboarding_qr(req: VerifyQrRequest):
+    """
+    Validates a registration token.
+    Publicly accessible so student's browser can verify token when opening QR link.
+    """
+    result = verify_registration_token(req.token, max_age_seconds=360)
+    if not result["valid"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Invalid or expired registration QR token.")
+        )
+    return {
+        "status": "valid",
+        "hostel_id": result.get("hostel_id", "block-b"),
+        "remaining_seconds": result.get("remaining_seconds", 300),
+        "message": "Token verified. Registration unlocked."
+    }
+
+@router.get("/pending-registrations", response_model=List[UserResponse], dependencies=[Depends(require_admin_pin)])
+async def get_pending_registrations(db: AsyncSession = Depends(get_db)):
+    """
+    Returns list of all new student registration requests awaiting operator approval.
+    """
+    pending = await UserRepository.get_pending_registrations(db)
+    return [UserResponse.model_validate(u) for u in pending]
+
+@router.post("/registrations/{user_id}/approve", response_model=UserResponse, dependencies=[Depends(require_admin_pin)])
+async def approve_resident_registration(user_id: UUID, db: AsyncSession = Depends(get_db)):
+    """
+    Approves a resident's registration request, enabling immediate login.
+    """
+    user = await UserRepository.approve_registration(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student registration request not found."
+        )
+    return UserResponse.model_validate(user)
+
+@router.post("/registrations/{user_id}/reject", dependencies=[Depends(require_admin_pin)])
+async def reject_resident_registration(user_id: UUID, db: AsyncSession = Depends(get_db)):
+    """
+    Rejects a resident's registration request.
+    """
+    user = await UserRepository.reject_registration(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student registration request not found."
+        )
+    return {
+        "status": "success",
+        "message": f"Registration request for {user.name} (Room {user.room_number}) has been rejected."
+    }
+
+
+
 

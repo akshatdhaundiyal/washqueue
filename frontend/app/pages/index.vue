@@ -9,7 +9,7 @@ import ApplianceCard from '~/components/hub/ApplianceCard.vue'
 import ResidentProfileView from '~/components/hub/ResidentProfileView.vue'
 import SettingsModal from '~/components/hub/SettingsModal.vue'
 import MobileBottomNav from '~/components/hub/MobileBottomNav.vue'
-import PowerGraphModal from '~/components/common/PowerGraphModal.vue'
+import MachineStatusModal from '~/components/hub/MachineStatusModal.vue'
 
 // Configuration & Theme
 const config = useRuntimeConfig()
@@ -17,6 +17,14 @@ const apiBase = config.public?.apiBaseUrl || 'http://localhost:8000'
 
 // Persistent Theme Synchronization
 const { isDark: darkMode, toggleTheme, setTheme } = useAppTheme()
+
+// Localized Timezone Management
+const {
+  formatDate,
+  formatTime,
+  parseToUtcDate,
+  getTimezoneAbbr
+} = useAppTimezone()
 
 // Navigation & Modal State
 const activeTab = ref('home') // 'home' | 'machines' | 'profile'
@@ -26,6 +34,44 @@ const filterType = ref('all') // 'all' | 'washers' | 'dryers' | 'free' | 'uncoll
 const pushAlertEnabled = ref(true)
 const anonymousBuzzEnabled = ref(true)
 
+// Helper to humanize cycle stage from power and elapsed time
+const getCycleStageInfo = (powerW, elapsedMin, isUncollected = false) => {
+  if (isUncollected) {
+    return {
+      stage: '🧺 Cycle Finished • Uncollected',
+      badgeClass: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+      remainingMin: 0
+    }
+  }
+  const remaining = Math.max(0, 45 - (elapsedMin || 0))
+
+  if (powerW >= 150.0) {
+    return {
+      stage: '🌀 Washing & Agitating',
+      badgeClass: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20',
+      remainingMin: remaining
+    }
+  } else if (powerW >= 5.0 && powerW < 150.0) {
+    return {
+      stage: '💧 Water Fill / Rinse',
+      badgeClass: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20',
+      remainingMin: remaining
+    }
+  } else if (powerW > 0.0 && powerW < 5.0) {
+    return {
+      stage: '⏳ Soaking Pause',
+      badgeClass: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20',
+      remainingMin: remaining
+    }
+  } else {
+    return {
+      stage: elapsedMin > 35 ? '💨 Final Spin Down' : '⏳ Soaking Pause',
+      badgeClass: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20',
+      remainingMin: remaining
+    }
+  }
+}
+
 // User's Claimed Active Appliance
 const myMachine = ref({
   claimed: false,
@@ -34,7 +80,9 @@ const myMachine = ref({
   location: 'Block B • 2nd Floor',
   isOn: false,
   runningMinutes: 0,
-  powerDraw: '0W',
+  cycleStage: '🌀 Active Washing',
+  stageBadgeClass: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20',
+  remainingMinutes: 30,
   startedAt: '',
   notifyWhenOff: false
 })
@@ -62,8 +110,7 @@ const showToast = (msg) => {
 
 // Formatted current date string
 const formattedDate = computed(() => {
-  const d = new Date()
-  return d.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  return formatDate(new Date())
 })
 
 // Synchronize machine status and active bookings with backend API
@@ -78,8 +125,13 @@ const fetchBackendData = async () => {
         
         let elapsed = 0
         if (m.active_booking?.started_at) {
-          elapsed = Math.max(0, Math.floor((Date.now() - new Date(m.active_booking.started_at).getTime()) / 60000))
+          const startedUtc = parseToUtcDate(m.active_booking.started_at)
+          if (startedUtc) {
+            elapsed = Math.max(0, Math.floor((Date.now() - startedUtc.getTime()) / 60000))
+          }
         }
+
+        const stageInfo = getCycleStageInfo(powerW, elapsed, isUncollected)
 
         return {
           id: m.id,
@@ -89,6 +141,9 @@ const fetchBackendData = async () => {
           isOn: isRunning,
           status: isUncollected ? 'uncollected' : isRunning ? 'in-use' : 'available',
           runningMinutes: elapsed,
+          cycleStage: stageInfo.stage,
+          stageBadgeClass: stageInfo.badgeClass,
+          remainingMinutes: stageInfo.remainingMin,
           finishedAgoMin: isUncollected ? (m.finished_ago_min || 0) : undefined,
           powerDraw: `${powerW.toFixed(0)}W`,
           nudgesSent: m.nudges_sent ?? 0,
@@ -98,6 +153,11 @@ const fetchBackendData = async () => {
         }
       })
 
+      // Keep opened detail modal in sync
+      if (isDetailModalOpen.value && selectedMachineForDetail.value) {
+        selectedMachineForDetail.value = machines.value.find(m => m.id === selectedMachineForDetail.value.id) || selectedMachineForDetail.value
+      }
+
       // Check if current user has an active booking on any machine
       const storedUser = typeof localStorage !== 'undefined' ? localStorage.getItem('washqueue_student_user') : null
       let currentUserId = null
@@ -105,11 +165,15 @@ const fetchBackendData = async () => {
         if (storedUser) currentUserId = JSON.parse(storedUser)?.id
       } catch (e) {}
 
+      const prevWasRunning = myMachine.value.claimed && myMachine.value.isOn
+
       const myActiveMachine = data.find(m => m.active_booking && currentUserId && m.active_booking.user_id === currentUserId)
       if (myActiveMachine && myActiveMachine.active_booking) {
-        const started = new Date(myActiveMachine.active_booking.started_at)
-        const elapsedMin = Math.max(0, Math.floor((Date.now() - started.getTime()) / 60000))
+        const startedUtc = parseToUtcDate(myActiveMachine.active_booking.started_at)
+        const elapsedMin = startedUtc ? Math.max(0, Math.floor((Date.now() - startedUtc.getTime()) / 60000)) : 0
         const pwr = myActiveMachine.latest_power_w ?? 0
+        const isUncoll = myActiveMachine.status === 'idle_full' || myActiveMachine.status === 'uncollected'
+        const stageInfo = getCycleStageInfo(pwr, elapsedMin, isUncoll)
         myMachine.value = {
           claimed: true,
           id: myActiveMachine.id,
@@ -117,9 +181,17 @@ const fetchBackendData = async () => {
           location: 'Block B • 2nd Floor',
           isOn: myActiveMachine.status === 'in_use' || pwr >= 10.0,
           runningMinutes: elapsedMin,
+          cycleStage: stageInfo.stage,
+          stageBadgeClass: stageInfo.badgeClass,
+          remainingMinutes: stageInfo.remainingMin,
           powerDraw: `${pwr.toFixed(0)}W`,
-          startedAt: started.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          startedAt: formatTime(startedUtc),
           notifyWhenOff: true
+        }
+
+        // Completion alert prompt for resident
+        if (prevWasRunning && !myMachine.value.isOn && pushAlertEnabled.value) {
+          showToast('🧺 Your laundry is done! Please collect within 15 minutes to avoid being buzzed.')
         }
       } else if (!myMachine.value.id || !data.some(m => m.id === myMachine.value.id && m.active_booking)) {
         myMachine.value.claimed = false
@@ -138,11 +210,17 @@ onMounted(() => {
   intervalId = setInterval(() => {
     if (myMachine.value.claimed && myMachine.value.isOn) {
       myMachine.value.runningMinutes += 1
+      myMachine.value.remainingMinutes = Math.max(0, 45 - myMachine.value.runningMinutes)
     }
 
     machines.value = machines.value.map((m) => {
       if (m.isOn) {
-        return { ...m, runningMinutes: m.runningMinutes + 1 }
+        const nextRun = m.runningMinutes + 1
+        return {
+          ...m,
+          runningMinutes: nextRun,
+          remainingMinutes: Math.max(0, 45 - nextRun)
+        }
       }
       if (m.status === 'uncollected' && m.finishedAgoMin !== undefined) {
         return { ...m, finishedAgoMin: m.finishedAgoMin + 1 }
@@ -176,7 +254,8 @@ const handleClaimMachine = async (machine) => {
     return
   }
 
-  const startTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const startTime = formatTime(new Date())
+  const stageInfo = getCycleStageInfo(250.0, 1)
 
   machines.value = machines.value.map((m) =>
     m.id === machine.id
@@ -185,6 +264,9 @@ const handleClaimMachine = async (machine) => {
           isOn: true,
           status: 'in-use',
           runningMinutes: 1,
+          cycleStage: stageInfo.stage,
+          stageBadgeClass: stageInfo.badgeClass,
+          remainingMinutes: 44,
           powerDraw: m.type === 'dryer' ? '1800W' : '310W'
         }
       : m
@@ -197,6 +279,9 @@ const handleClaimMachine = async (machine) => {
     location: machine.location,
     isOn: true,
     runningMinutes: 1,
+    cycleStage: stageInfo.stage,
+    stageBadgeClass: stageInfo.badgeClass,
+    remainingMinutes: 44,
     powerDraw: machine.type === 'dryer' ? '1800W' : '310W',
     startedAt: startTime,
     notifyWhenOff: true
@@ -223,7 +308,15 @@ const handleReleaseMachine = async () => {
   if (machineId) {
     machines.value = machines.value.map((m) =>
       m.id === machineId
-        ? { ...m, isOn: false, status: 'available', runningMinutes: 0, powerDraw: '0W' }
+        ? {
+            ...m,
+            isOn: false,
+            status: 'available',
+            runningMinutes: 0,
+            cycleStage: '',
+            remainingMinutes: 0,
+            powerDraw: '0W'
+          }
         : m
     )
   }
@@ -235,6 +328,9 @@ const handleReleaseMachine = async () => {
     location: '',
     isOn: false,
     runningMinutes: 0,
+    cycleStage: '🌀 Active Washing',
+    stageBadgeClass: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20',
+    remainingMinutes: 0,
     powerDraw: '0W',
     startedAt: '',
     notifyWhenOff: false
@@ -280,6 +376,60 @@ const handleSendBuzz = async (machineId, machineName, isUncollected = false) => 
   }
 }
 
+// Machine Status Drawer / Modal State
+const selectedMachineForDetail = ref(null)
+const isDetailModalOpen = ref(false)
+
+const openMachineDetail = (machine) => {
+  selectedMachineForDetail.value = machine
+  isDetailModalOpen.value = true
+}
+
+// Join / Leave Virtual Waitlist Queue
+const handleJoinQueue = async (machine) => {
+  const currentUser = getCurrentUser()
+  if (!currentUser || !currentUser.id) {
+    showToast('Please sign in to join the waitlist.')
+    navigateTo('/login')
+    return
+  }
+
+  try {
+    await $fetch(`${apiBase}/api/machines/${machine.id}/queue/join`, {
+      method: 'POST',
+      body: { user_id: currentUser.id }
+    })
+    showToast(`Joined waitlist for ${machine.name}! You'll be alerted when free 📋`)
+    await fetchBackendData()
+    if (selectedMachineForDetail.value?.id === machine.id) {
+      selectedMachineForDetail.value = machines.value.find(m => m.id === machine.id) || selectedMachineForDetail.value
+    }
+  } catch (err) {
+    const msg = err?.data?.detail || 'Could not join waitlist'
+    showToast(msg)
+  }
+}
+
+const handleLeaveQueue = async (machine) => {
+  const currentUser = getCurrentUser()
+  if (!currentUser || !currentUser.id) return
+
+  try {
+    await $fetch(`${apiBase}/api/machines/${machine.id}/queue/leave`, {
+      method: 'POST',
+      body: { user_id: currentUser.id }
+    })
+    showToast(`Left waitlist for ${machine.name}.`)
+    await fetchBackendData()
+    if (selectedMachineForDetail.value?.id === machine.id) {
+      selectedMachineForDetail.value = machines.value.find(m => m.id === machine.id) || selectedMachineForDetail.value
+    }
+  } catch (err) {
+    const msg = err?.data?.detail || 'Could not leave waitlist'
+    showToast(msg)
+  }
+}
+
 // Helper to switch filter and tab simultaneously
 const setFilterAndNavigate = (type) => {
   filterType.value = type
@@ -302,68 +452,29 @@ const filteredMachines = computed(() => {
   })
 })
 
-// =========================================================================
-// 4-HOUR POWER CONSUMPTION GRAPH POPUP (Tapping Machine Card)
-// =========================================================================
-const isPowerGraphOpen = ref(false)
-const selectedMachineForGraph = ref(null)
-const machinePowerHistory = ref(null)
-const historyLoading = ref(false)
-
-// Open 4-hour Power Consumption Graph on Card Tap
-const openMachinePowerGraph = async (machine) => {
-  selectedMachineForGraph.value = machine
-  isPowerGraphOpen.value = true
-  historyLoading.value = true
-  machinePowerHistory.value = null
-
-  try {
-    const data = await $fetch(`${apiBase}/api/machines/${machine.id}/power-history?hours=4`)
-    machinePowerHistory.value = data
-  } catch (err) {
-    machinePowerHistory.value = {
-      plug_id: machine.id,
-      plug_name: `${machine.name} • Smart Plug Node`,
-      hours: 4,
-      peak_power_w: 0.0,
-      avg_power_w: 0.0,
-      local_points_count: 0,
-      cloud_points_count: 0,
-      series: []
-    }
-  } finally {
-    historyLoading.value = false
-  }
-}
-
-// Background auto-refresh for resident machine power graph
-const refreshMachinePowerHistory = async () => {
-  if (!isPowerGraphOpen.value || !selectedMachineForGraph.value?.id) return
-  try {
-    const data = await $fetch(`${apiBase}/api/machines/${selectedMachineForGraph.value.id}/power-history?hours=4`)
-    machinePowerHistory.value = data
-  } catch (err) {
-    // silent fallback
-  }
-}
-
 // Real-time Local Edge WebSocket live stream listener
 const { isConnected: isWsConnected } = useLocalWebSocket(apiBase, (event) => {
   if (event.type === 'telemetry_update' && event.plug_id) {
-    // Append dynamically to 4-hour graph if open
-    if (isPowerGraphOpen.value && machinePowerHistory.value) {
-      const newPt = {
-        timestamp: event.telemetry.recorded_at,
-        power_w: event.telemetry.power_w || 0.0,
-        voltage_v: event.telemetry.voltage_v,
-        current_ma: event.telemetry.current_ma,
-        source: event.telemetry.source || 'local'
+    const powerW = event.telemetry?.power_w || 0.0
+    // Dynamically update cycle stages on active machines
+    machines.value = machines.value.map((m) => {
+      if (m.id === event.plug_id && m.isOn) {
+        const stageInfo = getCycleStageInfo(powerW, m.runningMinutes, m.status === 'uncollected')
+        return {
+          ...m,
+          cycleStage: stageInfo.stage,
+          stageBadgeClass: stageInfo.badgeClass
+        }
       }
-      machinePowerHistory.value.series.push(newPt)
-      machinePowerHistory.value.local_points_count++
-      if (newPt.power_w > machinePowerHistory.value.peak_power_w) {
-        machinePowerHistory.value.peak_power_w = newPt.power_w
-      }
+      return m
+    })
+    if (myMachine.value.claimed && myMachine.value.id === event.plug_id) {
+      const stageInfo = getCycleStageInfo(powerW, myMachine.value.runningMinutes)
+      myMachine.value.cycleStage = stageInfo.stage
+      myMachine.value.stageBadgeClass = stageInfo.badgeClass
+    }
+    if (isDetailModalOpen.value && selectedMachineForDetail.value?.id === event.plug_id) {
+      selectedMachineForDetail.value = machines.value.find(m => m.id === event.plug_id) || selectedMachineForDetail.value
     }
   } else if (event.type === 'machine_status_change') {
     fetchBackendData()
@@ -435,8 +546,8 @@ const { isConnected: isWsConnected } = useLocalWebSocket(apiBase, (event) => {
                   :dark-mode="darkMode"
                   @release-machine="handleReleaseMachine"
                   @browse-machines="activeTab = 'machines'"
-                  @toggle-notify="showToast(myMachine.notifyWhenOff ? 'Notification already set for 0W motor shutdown 🔔' : 'Alert configured!')"
-                  @view-history="openMachinePowerGraph"
+                  @toggle-notify="showToast(myMachine.notifyWhenOff ? 'Notification already set for completion 🔔' : 'Alert configured!')"
+                  @view-details="openMachineDetail(machines.find(m => m.id === myMachine.id) || myMachine)"
                 />
               </div>
 
@@ -495,9 +606,9 @@ const { isConnected: isWsConnected } = useLocalWebSocket(apiBase, (event) => {
                 :machine="machine"
                 :is-my-machine="myMachine.claimed && myMachine.id === machine.id"
                 :dark-mode="darkMode"
+                @select="openMachineDetail"
                 @claim="handleClaimMachine"
                 @buzz="handleSendBuzz"
-                @view-history="openMachinePowerGraph"
               />
             </div>
           </div>
@@ -535,17 +646,19 @@ const { isConnected: isWsConnected } = useLocalWebSocket(apiBase, (event) => {
       @update:anonymous-buzz-enabled="anonymousBuzzEnabled = $event"
     />
 
-    <!-- 9. 4-HOUR POWER CONSUMPTION GRAPH POPUP (Tapping Machine Card) -->
-    <PowerGraphModal
-      :is-open="isPowerGraphOpen"
-      :title="selectedMachineForGraph?.name"
-      :subtitle="selectedMachineForGraph?.location || 'Block B • 2nd Floor'"
-      :plug="selectedMachineForGraph"
-      :history="machinePowerHistory"
-      :loading="historyLoading"
+    <!-- 9. RESIDENT MACHINE STATUS & WAITLIST DRAWER/MODAL -->
+    <MachineStatusModal
+      :is-open="isDetailModalOpen"
+      :machine="selectedMachineForDetail"
+      :is-my-machine="myMachine.claimed && myMachine.id === selectedMachineForDetail?.id"
       :dark-mode="darkMode"
-      @close="isPowerGraphOpen = false"
-      @refresh="refreshMachinePowerHistory"
+      :current-user="getCurrentUser()"
+      @close="isDetailModalOpen = false"
+      @claim="handleClaimMachine"
+      @buzz="handleSendBuzz"
+      @release="handleReleaseMachine"
+      @join-queue="handleJoinQueue"
+      @leave-queue="handleLeaveQueue"
     />
   </div>
 </template>

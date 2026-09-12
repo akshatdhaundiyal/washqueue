@@ -2,6 +2,25 @@
 import { ref } from 'vue'
 import { RefreshCw, Download } from 'lucide-vue-next'
 
+const { formatDateTime, getTimezoneAbbr } = useAppTimezone()
+
+const isDateTimeCol = (colName) => {
+  if (!colName) return false
+  const lower = String(colName).toLowerCase()
+  return lower.endsWith('_at') || lower.includes('timestamp') || lower.includes('time') || lower === 'date'
+}
+
+const formatCellValue = (colName, val) => {
+  if (val === null || val === undefined) return null
+  if (isDateTimeCol(colName) && typeof val === 'string' && val.length >= 10) {
+    try {
+      const formatted = formatDateTime(val)
+      if (formatted && formatted !== '—') return formatted
+    } catch (e) {}
+  }
+  return val
+}
+
 const props = defineProps({
   dbTarget: {
     type: String,
@@ -227,6 +246,13 @@ const exportCsv = () => {
                 <span v-else-if="typeof row[col] === 'boolean'" class="px-1.5 py-0.2 rounded text-[10px]" :class="row[col] ? 'bg-emerald-500/20 text-emerald-500' : 'bg-rose-500/20 text-rose-500'">
                   {{ row[col] ? 'TRUE' : 'FALSE' }}
                 </span>
+                <span
+                  v-else-if="isDateTimeCol(col) && row[col]"
+                  :title="`Raw UTC: ${row[col]}`"
+                  class="font-mono text-[11px] text-amber-600 dark:text-amber-400"
+                >
+                  {{ formatCellValue(col, row[col]) }}
+                </span>
                 <span v-else>{{ row[col] }}</span>
               </td>
             </tr>
@@ -369,6 +395,13 @@ const exportCsv = () => {
                   <span v-if="row[col] === null" :class="darkMode ? 'text-zinc-600' : 'text-slate-400'" class="italic">NULL</span>
                   <span v-else-if="typeof row[col] === 'boolean'" class="px-1.5 py-0.2 rounded text-[10px]" :class="row[col] ? 'bg-emerald-500/20 text-emerald-500' : 'bg-rose-500/20 text-rose-500'">
                     {{ row[col] ? 'TRUE' : 'FALSE' }}
+                  </span>
+                  <span
+                    v-else-if="isDateTimeCol(col) && row[col]"
+                    :title="`Raw UTC: ${row[col]}`"
+                    class="font-mono text-[11px] text-amber-600 dark:text-amber-400"
+                  >
+                    {{ formatCellValue(col, row[col]) }}
                   </span>
                   <span v-else>{{ row[col] }}</span>
                 </td>

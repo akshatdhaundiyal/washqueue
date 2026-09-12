@@ -34,6 +34,8 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'refresh'])
 
+const { formatTime, formatTimeWithSeconds, parseToUtcDate, getTimezoneAbbr } = useAppTimezone()
+
 const hoveredPointIndex = ref(null)
 let autoRefreshTimer = null
 
@@ -70,18 +72,14 @@ onUnmounted(() => {
 // Safe Date parser for UTC/ISO strings
 const getPointDate = (pt) => {
   if (!pt?.timestamp) return null
-  const ts = pt.timestamp
-  const isoStr = typeof ts === 'string' && !ts.endsWith('Z') && !ts.includes('+') && !ts.slice(10).includes('-') ? ts + 'Z' : ts
-  const d = new Date(isoStr)
-  return isNaN(d.getTime()) ? null : d
+  return parseToUtcDate(pt.timestamp)
 }
 
 // Format point timestamp cleanly with timezone resilience
 const formatPointTime = (ts) => {
   if (!ts) return 'Recent'
-  const isoStr = typeof ts === 'string' && !ts.endsWith('Z') && !ts.includes('+') && !ts.slice(10).includes('-') ? ts + 'Z' : ts
-  const d = new Date(isoStr)
-  return isNaN(d.getTime()) ? 'Recent' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const d = parseToUtcDate(ts)
+  return d ? formatTimeWithSeconds(d) : 'Recent'
 }
 
 // Latest database reading in the series
@@ -97,10 +95,10 @@ const timeTicks = computed(() => {
   const ticks = []
   for (let i = 4; i >= 0; i--) {
     const t = new Date(latestDate.getTime() - i * 60 * 60 * 1000)
-    const timeStr = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const timeStr = formatTime(t)
     const x = 20 + ((4 - i) / 4) * (760 - 40)
     ticks.push({
-      label: i === 0 ? `${timeStr} (Latest DB)` : timeStr,
+      label: i === 0 ? `${timeStr} (Latest)` : timeStr,
       offset: i === 0 ? 'Latest' : `-${i}h`,
       x,
       isLive: i === 0
@@ -200,8 +198,8 @@ const exportToCsv = () => {
         <div>
           <div class="flex items-center gap-2">
             <span class="text-xs font-mono font-bold text-[#10b981]">APPLIANCE_POWER_TELEMETRY</span>
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-sky-500/20 text-sky-400 border-sky-500/30">
-              4-Hour Horizon
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full border" :class="darkMode ? 'bg-white/5 border-white/10 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-600'">
+              Telemetry Archive (Last 4 Hours • {{ getTimezoneAbbr() }})
             </span>
             <span class="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>

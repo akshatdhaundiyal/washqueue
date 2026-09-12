@@ -1,5 +1,5 @@
 <script setup>
-import { Disc, Power, Bell, Activity } from 'lucide-vue-next'
+import { Disc, Power, Bell, Sparkles } from 'lucide-vue-next'
 
 const props = defineProps({
   myMachine: {
@@ -12,7 +12,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['release-machine', 'browse-machines', 'toggle-notify', 'view-history'])
+const emit = defineEmits(['release-machine', 'browse-machines', 'toggle-notify', 'view-details'])
 </script>
 
 <template>
@@ -38,6 +38,14 @@ const emit = defineEmits(['release-machine', 'browse-machines', 'toggle-notify',
           <span class="text-sm font-bold text-slate-900 dark:text-white tracking-tight">
             {{ myMachine.name }}
           </span>
+          <button
+            @click="emit('view-details')"
+            class="text-[10px] font-bold px-2.5 py-0.5 rounded-md bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30 hover:bg-sky-500/25 transition-all flex items-center gap-1 cursor-pointer"
+            title="View Machine Status Drawer"
+          >
+            <span>{{ myMachine.cycleStage || '🌀 Active Washing' }}</span>
+            <span class="text-[9px] opacity-70">▸</span>
+          </button>
         </div>
         <button
           @click="emit('release-machine')"
@@ -65,25 +73,17 @@ const emit = defineEmits(['release-machine', 'browse-machines', 'toggle-notify',
             min running
           </span>
         </div>
-        <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 font-normal flex items-center gap-2.5 flex-wrap">
-          <span>Started at <span class="font-medium text-slate-700 dark:text-slate-200">{{ myMachine.startedAt }}</span> • Current draw:
-          <strong class="text-slate-900 dark:text-white font-bold font-mono tabular-nums">{{ myMachine.powerDraw }}</strong></span>
-          <button
-            @click="emit('view-history', myMachine)"
-            class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold border border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400 hover:bg-sky-500/20 transition-all flex items-center gap-1 active:scale-95 shadow-2xs"
-            title="View 4-Hour Power Telemetry Graph"
-          >
-            <Activity class="w-3.5 h-3.5" />
-            <span>4h Power Curve</span>
-          </button>
+        <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 font-normal flex items-center justify-between flex-wrap gap-2">
+          <span>Started at <strong class="font-medium text-slate-700 dark:text-slate-200">{{ myMachine.startedAt }}</strong></span>
+          <span class="font-mono font-bold text-emerald-600 dark:text-emerald-400">~{{ myMachine.remainingMinutes || 30 }}m estimated remaining</span>
         </p>
       </div>
 
-      <!-- Status Capsule & 0W Stop Alert -->
+      <!-- Status Capsule & Completion Notification Alert -->
       <div class="pt-5 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div class="inline-flex items-center gap-2 bg-slate-900 dark:bg-slate-800 text-white px-4 py-2 rounded-full text-xs font-bold self-start sm:self-auto shadow-xs">
           <Power class="w-3.5 h-3.5 text-emerald-400" />
-          <span>Motor Active</span>
+          <span>{{ myMachine.isOn ? 'Motor Active' : 'Cycle Completed' }}</span>
         </div>
 
         <button
@@ -91,7 +91,7 @@ const emit = defineEmits(['release-machine', 'browse-machines', 'toggle-notify',
           class="text-xs font-bold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 hover:underline flex items-center gap-1.5"
         >
           <Bell class="w-4 h-4" />
-          <span>Notify on 0W Stop</span>
+          <span>Notify when Cycle Completes</span>
         </button>
       </div>
     </div>

@@ -35,7 +35,23 @@ async def register_student(req: StudentRegisterRequest, db: AsyncSession = Depen
             detail="Name, Room Number, and Password are all required."
         )
 
+    # Validate physical QR registration token
+    try:
+        from app.qr_service import verify_registration_token
+    except ImportError:
+        from ..qr_service import verify_registration_token
+
+    token_check = verify_registration_token(req.registration_token, max_age_seconds=360)
+    if not token_check["valid"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=token_check.get("error", "Invalid or expired registration QR code. Please scan the live hostel display again.")
+        )
+
+    assigned_hostel = req.hostel.strip() if req.hostel else token_check.get("hostel_id", "Block B • Aryabhatta Hall")
+
     hashed = hash_password(req.password)
+
 
     # Check if this exact student (same name + room) already exists to update their credentials
     existing_user_query = await db.execute(
@@ -49,31 +65,35 @@ async def register_student(req: StudentRegisterRequest, db: AsyncSession = Depen
     if existing_user:
         # Update existing student's password and email/campus affiliation
         existing_user.hashed_password = hashed
+        if req.phone:
+            existing_user.phone = req.phone.strip()
         if req.email:
             existing_user.email = req.email.strip()
         if req.university:
             existing_user.university = req.university.strip()
         if req.college:
             existing_user.college = req.college.strip()
-        if req.hostel:
-            existing_user.hostel = req.hostel.strip()
+        if req.hostel or assigned_hostel:
+            existing_user.hostel = assigned_hostel
         await db.commit()
         await db.refresh(existing_user)
         return UserResponse.model_validate(existing_user)
 
-    # Create new student user (allowing roommates in double sharing rooms)
+    # Create new student user with 'pending' status awaiting hostel admin approval
     email_clean = req.email.strip() if req.email else f"{clean_name.lower().replace(' ', '')}.{clean_room.lower().replace(' ', '')}@hostel.internal"
     
     new_user = User(
         name=clean_name,
         room_number=clean_room,
         email=email_clean,
+        phone=req.phone.strip() if req.phone else None,
         hashed_password=hashed,
         role="student",
         is_admin=False,
-        university=req.university.strip() if req.university else None,
-        college=req.college.strip() if req.college else None,
-        hostel=req.hostel.strip() if req.hostel else None
+        status="pending",
+        university=req.university.strip() if req.university else "Apex Institute of Technology",
+        college=req.college.strip() if req.college else "School of Engineering & Technology",
+        hostel=assigned_hostel
     )
     db.add(new_user)
     await db.commit()
@@ -84,6 +104,7 @@ async def register_student(req: StudentRegisterRequest, db: AsyncSession = Depen
 async def login_student(req: StudentLoginRequest, db: AsyncSession = Depends(get_db)):
     """
     Authenticates a resident student by Room Number, Password, and optional Name (for double-sharing rooms).
+    Enforces that only approved residents can access the hub.
     """
     clean_room = req.room_number.strip().upper()
     hashed = hash_password(req.password)
@@ -103,6 +124,18 @@ async def login_student(req: StudentLoginRequest, db: AsyncSession = Depends(get
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Invalid credentials for {req.name.strip()} in Room {clean_room}."
             )
+
+        if user.status == "pending":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Your registration for Room {clean_room} is pending approval by the hostel administrator."
+            )
+        if user.status == "rejected":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Your registration for Room {clean_room} was rejected by the hostel administrator. Please visit the hostel desk."
+            )
+
         return UserResponse.model_validate(user)
 
     # Otherwise query all residents registered to this room number
@@ -133,7 +166,19 @@ async def login_student(req: StudentLoginRequest, db: AsyncSession = Depends(get
             detail="Multiple residents found in Room " + clean_room + ". Please enter your Name to specify your account."
         )
 
-    return UserResponse.model_validate(matching_users[0])
+    matched_user = matching_users[0]
+    if matched_user.status == "pending":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your registration for Room {clean_room} is pending approval by the hostel administrator."
+        )
+    if matched_user.status == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your registration for Room {clean_room} was rejected by the hostel administrator. Please visit the hostel desk."
+        )
+
+    return UserResponse.model_validate(matched_user)
 
 @router.delete("/profile/{id}")
 async def delete_student_profile(id: uuid.UUID, db: AsyncSession = Depends(get_db)):

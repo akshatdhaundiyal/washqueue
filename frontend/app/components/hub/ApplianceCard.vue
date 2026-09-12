@@ -1,5 +1,5 @@
 <script setup>
-import { Disc, Clock, Check, Plus, Zap, Activity } from 'lucide-vue-next'
+import { Disc, Clock, Check, Plus, Zap, Waves, Sparkles } from 'lucide-vue-next'
 
 const props = defineProps({
   machine: {
@@ -16,17 +16,14 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['claim', 'buzz', 'view-history'])
+const emit = defineEmits(['claim', 'buzz', 'select'])
 </script>
 
 <template>
   <div
-    @click="emit('view-history', machine)"
-    role="button"
-    tabindex="0"
-    :title="`Tap to view 4-hour power consumption graph for ${machine.name}`"
+    @click="emit('select', machine)"
     :class="[
-      'p-5 rounded-[26px] border transition-all flex flex-col justify-between cursor-pointer group hover:scale-[1.01]',
+      'p-5 rounded-[26px] border transition-all flex flex-col justify-between group hover:scale-[1.01] cursor-pointer',
       isMyMachine
         ? darkMode
           ? 'bg-[#151921] border-sky-500/50 ring-1 ring-sky-500/20 shadow-lg'
@@ -74,17 +71,6 @@ const emit = defineEmits(['claim', 'buzz', 'view-history'])
         </div>
 
         <div class="flex items-center gap-1.5">
-          <!-- 4h History Quick Icon Trigger -->
-          <button
-            type="button"
-            @click.stop="emit('view-history', machine)"
-            class="p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700/80 text-slate-400 hover:text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-950/30 transition-all flex items-center gap-1"
-            title="View 4-Hour Power Graph"
-          >
-            <Activity class="w-3.5 h-3.5 text-sky-500" />
-            <span class="text-[9px] font-mono hidden sm:inline font-bold">4h</span>
-          </button>
-
           <!-- Status Badge (JetBrains Mono tabular numbers) -->
           <span
             :class="[
@@ -114,33 +100,37 @@ const emit = defineEmits(['claim', 'buzz', 'view-history'])
         </div>
       </div>
 
-      <!-- Details & Telemetry Power Callout -->
+      <!-- Details & Humanized Cycle Stage Display -->
       <div class="my-2.5 text-xs">
         <div v-if="machine.status === 'available'" class="flex items-center justify-between">
           <p class="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5">
-            <Check class="w-3.5 h-3.5" /> Ready for immediate wash load
+            <Sparkles class="w-3.5 h-3.5" /> Ready for immediate wash load
           </p>
-          <span class="text-[10px] font-mono text-slate-400 group-hover:text-sky-500 transition-colors">
-            Tap for 4h curve →
-          </span>
         </div>
-        <div v-else-if="machine.status === 'in-use'" class="flex flex-col gap-1">
-          <p class="text-slate-600 dark:text-slate-300 font-normal">
-            Running for <span class="font-bold font-mono text-slate-900 dark:text-white tabular-nums">{{ machine.runningMinutes }} mins</span> • Draw:
-            <strong class="text-slate-900 dark:text-white font-bold font-mono tabular-nums">{{ machine.powerDraw }}</strong>
-            <span class="inline-flex items-center gap-1 ml-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400 group-hover:bg-sky-500/20 transition-colors">
-              📈 4h Graph
+        <div v-else-if="machine.status === 'in-use'" class="flex flex-col gap-1.5">
+          <div class="flex items-center justify-between">
+            <span
+              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border"
+              :class="machine.stageBadgeClass || 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'"
+            >
+              {{ machine.cycleStage || '🌀 Active Washing' }}
             </span>
+            <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+              ~{{ machine.remainingMinutes || 30 }}m remaining
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-500 dark:text-slate-400">
+            Running for <span class="font-bold text-slate-800 dark:text-slate-200 font-mono tabular-nums">{{ machine.runningMinutes }} mins</span> (standard cycle ~45m)
           </p>
         </div>
         <div v-else-if="machine.status === 'uncollected'" class="flex flex-col gap-1">
           <p class="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1.5">
             <Clock class="w-3.5 h-3.5 shrink-0" />
-            <span>Cycle finished <strong class="font-mono font-bold tabular-nums">{{ machine.finishedAgoMin }}m</strong> ago • Clothes in drum</span>
+            <span>Cycle finished <strong class="font-mono font-bold tabular-nums">{{ machine.finishedAgoMin }}m</strong> ago • Clean clothes in drum</span>
           </p>
-          <span class="text-[10px] font-mono text-amber-600/80 dark:text-amber-400/80 inline-flex items-center gap-1">
-            📈 Tap to inspect 4-hour cycle power history
-          </span>
+          <p class="text-[11px] text-slate-500 dark:text-slate-400">
+            Send a friendly buzz below to ask the occupant to collect their clothes.
+          </p>
         </div>
       </div>
     </div>

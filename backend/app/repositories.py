@@ -227,8 +227,38 @@ class UserRepository:
 
     @staticmethod
     async def get_all(db: AsyncSession) -> List[User]:
-        result = await db.execute(select(User).order_by(User.name))
+        result = await db.execute(select(User).order_by(User.created_at.desc()))
         return list(result.scalars().all())
+
+    @staticmethod
+    async def get_pending_registrations(db: AsyncSession) -> List[User]:
+        result = await db.execute(
+            select(User)
+            .where(User.status == "pending")
+            .order_by(User.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def approve_registration(db: AsyncSession, user_id: UUID) -> Optional[User]:
+        user = await UserRepository.get_by_id(db, user_id)
+        if not user:
+            return None
+        user.status = "approved"
+        user.approved_at = datetime.datetime.now(datetime.timezone.utc)
+        await db.commit()
+        await db.refresh(user)
+        return user
+
+    @staticmethod
+    async def reject_registration(db: AsyncSession, user_id: UUID) -> Optional[User]:
+        user = await UserRepository.get_by_id(db, user_id)
+        if not user:
+            return None
+        user.status = "rejected"
+        await db.commit()
+        await db.refresh(user)
+        return user
 
 
 class SmartPlugRepository:

@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { Lock, KeyRound, Sparkles, ArrowRight, ShieldCheck } from 'lucide-vue-next'
+import { Lock, KeyRound, ArrowRight, ShieldCheck } from 'lucide-vue-next'
 
 const props = defineProps({
   darkMode: {
@@ -22,10 +22,6 @@ const inputPin = ref('')
 
 const onSubmit = () => {
   emit('verify-pin', inputPin.value)
-}
-
-const fillDemoPin = () => {
-  inputPin.value = '1234'
 }
 </script>
 
@@ -75,22 +71,13 @@ const fillDemoPin = () => {
         </button>
       </form>
 
-      <!-- Demo PIN Button -->
-      <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-        <button
-          type="button"
-          @click="fillDemoPin"
-          class="font-semibold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
-        >
-          <Sparkles class="w-3.5 h-3.5 text-amber-500" />
-          <span>Fill Demo PIN (1234)</span>
-        </button>
-
+      <!-- Back to Login Navigation -->
+      <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center text-xs">
         <NuxtLink
           to="/login"
-          class="font-medium text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 inline-flex items-center gap-1"
+          class="font-medium text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 inline-flex items-center gap-1.5"
         >
-          <span>Common Login</span>
+          <span>Return to Common Sign In</span>
           <ArrowRight class="w-3 h-3" />
         </NuxtLink>
       </div>

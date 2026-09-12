@@ -41,9 +41,14 @@ async def lifespan(app: FastAPI):
                 cursor.execute("PRAGMA table_info(users)")
                 columns = [row[1] for row in cursor.fetchall()]
                 if columns:
-                    for col in ["university", "college", "hostel"]:
+                    for col in ["university", "college", "hostel", "phone"]:
                         if col not in columns:
                             cursor.execute(f"ALTER TABLE users ADD COLUMN {col} VARCHAR")
+                    if "status" not in columns:
+                        cursor.execute("ALTER TABLE users ADD COLUMN status VARCHAR DEFAULT 'approved'")
+                        cursor.execute("UPDATE users SET status = 'approved' WHERE status IS NULL")
+                    if "approved_at" not in columns:
+                        cursor.execute("ALTER TABLE users ADD COLUMN approved_at TIMESTAMP")
             except Exception:
                 pass
 
@@ -152,6 +157,16 @@ async def run_scheduler_tick(db: AsyncSession = Depends(get_db)):
         "updated_machines": updated_machines
     }
 
+@app.get("/api/system/settings")
+async def get_public_system_settings():
+    """Public system settings endpoint returning configured default timezone."""
+    return {
+        "timezone": settings.timezone,
+        "default_timezone": "Asia/Kolkata",
+        "app_name": "WashQueue",
+        "server_time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
+
 @app.get("/")
 async def root():
     return {
@@ -159,3 +174,4 @@ async def root():
         "status": "healthy",
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }
+

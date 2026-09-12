@@ -317,3 +317,28 @@ Headers:
 | **`< Idle` for >= Debounce Duration** | `idle_full` | Wash cycle completed. Machine is full and waiting to be emptied. |
 | **User clears machine** | `available` | Laundry removed; machine is empty and ready for next resident. |
 
+---
+
+## 11. Hardware Disconnection & Power Cycle Diagnostics
+
+When a smart plug is unplugged, moved to another socket, or the wall switch is toggled off, the system responds through a defined failover progression:
+
+### Diagnostic Progression During Hardware Disconnect
+1. **Local Socket Failure**: The persistent TCP connection to port `6668` drops. Subsequent connection attempts return Tuya error:
+   ```json
+   {"Error": "Network Error: Device Unreachable", "Err": "905"}
+   ```
+2. **Cloud Failover & 15-Second Cooldown**: The backend resets the local socket and triggers a 15-second collision cooldown, redirecting queries to the Tuya Cloud OpenAPI fallback.
+3. **Tuya Cloud Device Status**: Tuya Cloud's device registry reflects the true physical connectivity:
+   ```python
+   cloud.getconnectstatus(device_id)  # Returns False when offline
+   cloud.cloudrequest(f"/v1.0/devices/{device_id}")["result"]["online"]  # False
+   ```
+4. **Cloud Cache Caveat**: Standard Tuya status queries (`cloud.getstatus(device_id)`) retain and return the **last known telemetry snapshot** recorded before power loss (e.g. `cur_power: 35` $\rightarrow$ `3.5 W`, `cur_voltage: 2123` $\rightarrow$ `212.3 V`, `switch_1: False`).
+5. **Reconnection Window**: When the plug is plugged back into power:
+   - Hardware boot & 2.4 GHz Wi-Fi association takes **~15–30 seconds**.
+   - Router DHCP lease acquisition takes **~5–10 seconds**.
+   - Tuya Cloud MQTT/TLS handshake takes **~10–20 seconds**.
+   - Total time before live telemetry resumes is typically **30–60 seconds**.
+
+

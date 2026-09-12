@@ -1,6 +1,8 @@
 <script setup>
 import { Plus, Activity, Edit2, Trash2, Sliders } from 'lucide-vue-next'
 
+const { formatTimeWithSeconds } = useAppTimezone()
+
 const props = defineProps({
   smartPlugs: {
     type: Array,
@@ -189,7 +191,7 @@ const emit = defineEmits([
             <div class="flex justify-between">
               <span :class="darkMode ? 'text-slate-400' : 'text-slate-500'">Last Polled:</span>
               <span class="text-[11px]" :class="darkMode ? 'text-slate-400' : 'text-slate-500'">
-                {{ plug.latest_telemetry?.recorded_at ? new Date(plug.latest_telemetry.recorded_at).toLocaleTimeString() : 'Never' }}
+                {{ formatTimeWithSeconds(plug.latest_telemetry?.recorded_at) }}
               </span>
             </div>
           </div>

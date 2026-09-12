@@ -110,9 +110,12 @@ class User(Base):
     name = Column(String, nullable=False)
     room_number = Column(String, nullable=True)
     email = Column(String, nullable=True, unique=True)
+    phone = Column(String, nullable=True)
     hashed_password = Column(String, nullable=True)
     role = Column(String, nullable=False, default="student")  # "student" | "admin"
     is_admin = Column(Boolean, nullable=False, default=False)
+    status = Column(String, nullable=False, default="approved")  # "pending" | "approved" | "rejected"
+    approved_at = Column(UTCDateTime, nullable=True)
     university = Column(String, nullable=True)
     college = Column(String, nullable=True)
     hostel = Column(String, nullable=True)

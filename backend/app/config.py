@@ -27,6 +27,11 @@ class Settings(BaseSettings):
         default=0.0,
         alias="TUYA_CLOUD_TIME_OFFSET_SECONDS"
     )
+    timezone: str = Field(
+        default="Asia/Kolkata",
+        alias="TIMEZONE"
+    )
+
 
     class Config:
         env_file = ".env"

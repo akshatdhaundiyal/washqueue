@@ -1,4 +1,6 @@
 <script setup>
+const { formatTime } = useAppTimezone()
+
 const props = defineProps({
   machines: {
     type: Array,
@@ -108,7 +110,7 @@ const emit = defineEmits(['check-overdue', 'force-clear', 'add-machine', 'delete
               </div>
               <div class="flex items-center justify-between text-[11px]">
                 <span :class="darkMode ? 'text-slate-400' : 'text-slate-500'">Started:</span>
-                <span :class="darkMode ? 'text-zinc-300' : 'text-slate-600'">{{ new Date(machine.active_booking.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span>
+                <span :class="darkMode ? 'text-zinc-300' : 'text-slate-600'">{{ formatTime(machine.active_booking.started_at) }}</span>
               </div>
             </div>
             <div v-else class="text-center py-2 italic text-[11px]" :class="darkMode ? 'text-slate-400' : 'text-slate-500'">
@@ -133,7 +135,10 @@ const emit = defineEmits(['check-overdue', 'force-clear', 'add-machine', 'delete
             </span>
             <div v-if="machine.queue && machine.queue.length > 0" class="space-y-1">
               <div v-for="q in machine.queue" :key="q.user_id" class="flex justify-between text-[11px]">
-                <span :class="darkMode ? 'text-zinc-300' : 'text-slate-700'">#{{ q.position }} {{ q.user_name }}</span>
+                <span :class="darkMode ? 'text-zinc-300' : 'text-slate-700'">
+                  #{{ q.position }} {{ q.user_name }}
+                  <span v-if="q.joined_at" class="text-[10px] text-slate-400 font-normal">({{ formatTime(q.joined_at) }})</span>
+                </span>
                 <span class="text-[10px] uppercase" :class="darkMode ? 'text-slate-400' : 'text-slate-500'">{{ q.status }}</span>
               </div>
             </div>

@@ -54,6 +54,8 @@ class StudentRegisterRequest(BaseModel):
     name: str
     room_number: str
     password: str
+    registration_token: str
+    phone: Optional[str] = None
     email: Optional[str] = None
     university: Optional[str] = None
     college: Optional[str] = None
@@ -85,8 +87,11 @@ class UserResponse(BaseModel):
     name: str
     room_number: Optional[str] = None
     email: Optional[str] = None
+    phone: Optional[str] = None
     role: Optional[str] = "student"
     is_admin: bool = False
+    status: Optional[str] = "approved"  # "pending" | "approved" | "rejected"
+    approved_at: Optional[datetime] = None
     university: Optional[str] = None
     college: Optional[str] = None
     hostel: Optional[str] = None
@@ -196,3 +201,24 @@ class AdminMachineDetailResponse(BaseModel):
     smart_plug: Optional[SmartPlugResponse] = None
     latest_telemetry: Optional[TelemetryReadingResponse] = None
     model_config = ConfigDict(from_attributes=True)
+
+class SystemSettingsResponse(BaseModel):
+    timezone: str
+    default_timezone: str = "Asia/Kolkata"
+    server_time_utc: datetime
+
+class SystemSettingsUpdateRequest(BaseModel):
+    timezone: str
+
+class OnboardingQrResponse(BaseModel):
+    token: str
+    hostel_id: str
+    ttl_seconds: int = 60
+    expires_at: int
+    lan_ip: str
+    default_url: str
+
+class VerifyQrRequest(BaseModel):
+    token: str
+
+

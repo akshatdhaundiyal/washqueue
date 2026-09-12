@@ -52,30 +52,50 @@ For database portal documentation, see [docs/database_portal.md](docs/database_p
 
 ### 5. Unified Common Login Portal (`/login`)
 - Dual-role authentication hub serving both **Resident Students** and **Hostel Administrators**.
-- **Student Role**: Sign in or Register with Full Name, Room Number (with double-sharing room support), and Password, plus 1-tap demo login (`Room 214 • Akshat`).
-- **Admin Role**: Security PIN verification with 1-tap demo fill (`PIN 1234`), storing session securely in `sessionStorage` and redirecting directly into `/admin`.
+- **Resident Role**: Secure login using Room Number and Password with double-sharing room support. Gated against unapproved accounts.
+- **Admin Role**: Protected by administrative security PIN, verified through secure server-side session checks and unlocking the Operator Console.
 
-### 6. Operator Admin Console (`/admin`)
+### 6. Dynamic 1-Minute Rotating Cryptographic QR Station
+- **Physical Desk Kiosk**: Physical-presence verification using a 60-second rotating QR station running on a dedicated tablet at the laundry reception desk.
+- **Cryptographic Signatures**: Powered by HMAC-SHA256 tokens (`qr_service.py`):
+  $$\text{Token} = \text{hostel\_id} \,.\, \text{timestamp} \,.\, \text{nonce} \,.\, \text{HMAC}_{24}(\dots)$$
+- **360-Second Grace Window**: 60s rotation on kiosk + 300s grace window once opened on student phones to ensure a smooth, unhurried registration experience.
+- **Fullscreen Kiosk Mode**: High-contrast reception view (`AdminQrKioskModal.vue`) featuring high-contrast vector SVG QR rendering, circular SVG countdown ring, and hostel branding.
+- **Zero Dummy Data**: Complete removal of mock campus directories, fake one-tap buttons, and hardcoded room numbers.
+
+### 7. Student Registration Request & Administrator Approval Workflow
+- **Gated Onboarding**: Students scan the desk QR code to open the verified registration form. Direct visits to `/login` display a helpful "Hostel Desk QR Required" guidance view.
+- **Pending Status**: Newly registered accounts are created in `status: "pending"`. Login attempts before approval are blocked with **HTTP 403 Forbidden** and an informative guidance banner.
+- **Operator Review Queue**: Dedicated `PENDING_REGISTRATION_REQUESTS` queue card in the Operator Console (`UsersSettingsTab.vue`) showing applicant name, room number, mobile number, and local submission timestamp.
+- **1-Click Actions**: Operators can immediately approve (`✓ Approve Resident`) or reject (`✕ Reject`) applicants. Approved residents can instantly sign in and claim appliances.
+- **Dynamic Startup Migrations**: Backend startup routines (`migrate_user_columns()`) automatically update the SQLite schema with zero downtime or data loss.
+
+### 8. Hostel Local Timezone Localization Engine
+- **Configurable Campus Timezone**: Configurable via Operator Console (defaults to `Asia/Kolkata` - IST).
+- **Universal Local Conversion**: Automatically converts all backend UTC timestamps (`Z`) to the hostel's active local timezone across all student and admin views.
+- **12h / 24h Clock Preference**: Interactive toggle for 12-hour AM/PM or 24-hour military time formats, reactively updated via the `useAppTimezone()` composable.
+
+### 9. Operator Admin Console (`/admin`)
 - Built with the exact same left sidebar navigation structure as the main app.
 - 4 comprehensive operator management modules:
   1. **Fleet & Bookings Hub**: Real-time status, motor power indicators, and student identities.
   2. **Smart Plugs & Tuya IoT Nodes**: 1-second telemetry readings, relay remote toggles, and calibration modals.
   3. **Database Portal**: Interactive SQL execution console and schema viewer with JSON export.
-  4. **Users & Settings**: Searchable resident directory with multi-sharing room badges, and the new **Institution & Hostel Branding Portal**.
+  4. **Users & Settings**: Searchable resident directory with multi-sharing room badges, the **Pending Registration Requests** review queue, the **Resident Onboarding QR Station**, and the **Institution & Hostel Branding Portal**.
 - Desktop telemetry header with live sub-10ms WebSocket connection indicator and 1-second auto-refresh toggle.
 
-### 7. Modular Component Architecture
+### 10. Modular Component Architecture
 - Completely refactored from large monolithic templates into focused, single-responsibility components:
   - `frontend/app/components/hub/`: `AppSidebar.vue`, `AppTopHeader.vue`, `HomeHeroMachine.vue`, `OverviewCards.vue`, `ApplianceCard.vue`, `ResidentProfileView.vue`, `SettingsModal.vue`, `MobileBottomNav.vue`.
-  - `frontend/app/components/admin/`: `AdminSidebar.vue`, `AdminTopHeader.vue`, `AdminMetricsBanner.vue`, `AdminAuthOverlay.vue`, `FleetTab.vue`, `IotTab.vue`, `DatabasePortalTab.vue`, `UsersSettingsTab.vue`, etc.
+  - `frontend/app/components/admin/`: `AdminSidebar.vue`, `AdminTopHeader.vue`, `AdminMetricsBanner.vue`, `AdminAuthOverlay.vue`, `FleetTab.vue`, `IotTab.vue`, `DatabasePortalTab.vue`, `UsersSettingsTab.vue`, `AdminQrKioskModal.vue`, etc.
   - `frontend/app/components/common/`: `AppLogo.vue`, `AppBranding.vue`.
 
-### 8. Student Registration & Multi-Sharing Room Support
+### 11. Student Registration & Multi-Sharing Room Support
 - Uniqueness is keyed on `(Student Name, Room Number)`. Roommates share the same room number without credential collisions.
 - **Public Dashboard (`/`)**: Displays anonymized status (**`"Occupied by Resident"`**) to protect privacy while showing live cycle progress and power state.
-- **Operator Console (`/admin`)**: Unmasks exact student identities (**Name**, **Room Number**, **Start Time**) for management auditing.
+- **Operator Console (`/admin`)**: Unmasks exact student identities (**Name**, **Room Number**, **Mobile Phone**, **Start Time**) for management auditing.
 
-### 9. Smart Plug Telemetry, Resilience Engine & Visual Calibration Studio
+### 12. Smart Plug Telemetry, Resilience Engine & Visual Calibration Studio
 - **Persistent Connection Pooling**: Reuses established TCP connections on port 6668 via `_device_pool`, eliminating socket churn and slashing query latency to ~15ms.
 - **Per-Device Concurrency Serialization**: `asyncio.Lock` per plug serializes background polling and manual switch toggles to eliminate intra-process port collisions.
 - **Adaptive Timeout Sensitivity**: Fast 1.5s probe on persistent sockets, expanding to 3.5s with retry on connection loss.
@@ -94,15 +114,15 @@ For database portal documentation, see [docs/database_portal.md](docs/database_p
   - **🔷 Tuya Cloud Fallback (`#06b6d4`, `◆`)**: Cyan diamond point markers and dashed connector lines.
 - **Crash-Resilient Persistence**: Primary database (`washqueue.db`) runs in SQLite **WAL mode** (`journal_mode=WAL`), ensuring atomic disk sync and concurrent non-blocking reads/writes.
 
-### 10. CLI Telemetry Logging & Smart Dual-Mode Suite
+### 13. CLI Telemetry Logging & Smart Dual-Mode Suite
 - **`read_plug.py`**: Instant live plug diagnostic tool with **smart dual-mode**—streams from active backend API or direct socket if backend is stopped.
 - **`record_telemetry.py`**: High-frequency 1s telemetry recorder that streams live metrics, logs to CSV & SQLite, and auto-calibrates thresholds upon cycle completion (with backend stream auto-routing).
 - **`simulate_wash_cycle.py`**: Synthetic cycle generator creating realistic physics-based power curves for multi-stage washers.
 - **`tune_from_csv.py`**: Offline replay tool to benchmark debounce and threshold combinations against any saved CSV run.
 - **`export_telemetry.py`**: Quick dump tool for exporting historical SQLite telemetry to CSV or JSON.
 
-### 11. Strict Role-Based Architecture & Authentication
-- **Unified Login Portal (`/login`)**: Single authentic point of entry for residents (Student ID / Room Number) and operators (Admin PIN).
+### 14. Strict Role-Based Architecture & Authentication
+- **Unified Login Portal (`/login`)**: Single authentic point of entry for residents (Room Number + Password) and operators (Admin PIN).
 - **Zero Prototype Clutter**: Clean navigation separation—student interface focused on laundry workflows with `<LogOut />`, operator console dedicated to IoT fleet management and institutional controls.
 - **Operator Console**: Exclusively dedicated to hostel fleet management, IoT telemetry, database inspection, and institutional identity, protected by a secure **`Lock Admin Session`** control.
 

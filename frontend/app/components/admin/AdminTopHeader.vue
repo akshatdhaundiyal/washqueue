@@ -1,5 +1,5 @@
 <script setup>
-import { Shield, RefreshCw, Lock } from 'lucide-vue-next'
+import { Shield, RefreshCw, Lock, Clock } from 'lucide-vue-next'
 
 const props = defineProps({
   currentAdminTab: {
@@ -25,6 +25,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['refresh-data', 'update:isAutoRefresh', 'lock-session'])
+
+const { selectedTimezone, getTimezoneAbbr, getTimezoneOffsetStr } = useAppTimezone()
 </script>
 
 <template>
@@ -42,7 +44,7 @@ const emit = defineEmits(['refresh-data', 'update:isAutoRefresh', 'lock-session'
         </div>
         <div>
           <span class="text-sm font-bold text-slate-900 dark:text-white block leading-none">Admin Console</span>
-          <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">Block B Operator</span>
+          <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">Block B Operator • {{ getTimezoneAbbr() }}</span>
         </div>
       </div>
 
@@ -84,7 +86,18 @@ const emit = defineEmits(['refresh-data', 'update:isAutoRefresh', 'lock-session'
             {{ isWsConnected ? 'Local Edge WebSocket Live (<10ms)' : 'Polling Active' }}
           </span>
         </div>
+        <span class="text-slate-300 dark:text-slate-700">•</span>
+        <div 
+          class="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border bg-white dark:bg-slate-800/80 border-slate-200/80 dark:border-slate-700 shadow-2xs"
+          :title="`Active System Timezone: ${selectedTimezone}`"
+        >
+          <Clock class="w-3.5 h-3.5 text-amber-500" />
+          <span class="text-slate-600 dark:text-slate-400 font-mono">
+            {{ getTimezoneAbbr() }} ({{ getTimezoneOffsetStr() }})
+          </span>
+        </div>
       </div>
+
 
       <!-- Right: Controls -->
       <div class="flex items-center gap-3">

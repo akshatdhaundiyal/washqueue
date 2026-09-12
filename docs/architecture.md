@@ -15,9 +15,12 @@ WashQueue uses a **Hybrid Edge-Cloud Architecture**:
      - **Modularized Hub Components**: `HomeHeroMachine` (active stopwatch), `OverviewCards` (room stats), `ApplianceCard` (6-machine grid), `ResidentProfileView` (rules & info), and `SettingsModal`.
      - **Admin Console Layout**: Aligned with the desktop left sidebar (`AdminSidebar`) and telemetry header (`AdminTopHeader`).
      - **Institutional Branding Engine**: Reusable `<AppLogo>` component (auto-theme adaptive SVG vector mark with isolated instance gradients) and composite `<AppBranding>` header component (Logo + Divider + University/Org + Hostel/Hall Name & Crest). Managed dynamically via `useHostelBranding()` with live dual-theme preview in `UsersSettingsTab.vue`.
+     - **Hostel Timezone Localization Engine**: Universal conversion from UTC database timestamps (`Z`) to local hostel timezone (default: `Asia/Kolkata` - IST) with a 12-hour AM/PM vs 24-hour military clock display preference toggle via `useAppTimezone()`.
      - **Typography Engine**: **Plus Jakarta Sans** for UI/text paired with **JetBrains Mono** (`tabular-nums`) for jitter-free telemetry numbers, stopwatches, wattages, and database tables. High contrast parity guaranteed across both dark and light modes.
    - **FastAPI Engine**: Runs backend logic, PIN authentication, student identity/registration router, provider-agnostic smart plug drivers, and background workers using native **`uv`**.
-   - **Embedded SQLite (`washqueue.db`)**: Primary edge database (`sqlite+aiosqlite`) with hardened schema constraints, composite indexing, and health tracking.
+   - **Dynamic Rotating QR Station (`qr_service.py`)**: Generates cryptographically signed HMAC-SHA256 registration tokens with a 60-second rotation frequency and 360-second verification window for physical laundry desk kiosks.
+   - **Student Approval State Machine**: Implements an administrative gate (`status: "pending"` $\rightarrow$ `"approved"` / `"rejected"`). New registrants cannot log in or reserve machines until an admin reviews and approves the request in the Operator Console.
+   - **Embedded SQLite (`washqueue.db`)**: Primary edge database (`sqlite+aiosqlite`) with hardened schema constraints, composite indexing, dynamic startup column migrations (`migrate_user_columns()`), and health tracking.
    - **Wipro / Tuya Smart Plug Driver & Concurrency Engine**: High-speed (1-second) local socket telemetry polling over TCP port 6668 via `tinytuya`. Features a persistent socket connection pool (`BoundOutletDevice`) to eliminate socket churn, per-device `asyncio.Lock` serialization, adaptive timeout sensitivity (1.5s probe $\rightarrow$ 3.5s reconnect), a 3-miss grace buffer, safe physical NIC binding, and a 15-second collision cooldown with automatic **Tuya Cloud OpenAPI Fallback** when the plug is occupied or router client isolation is active.
    - **Dual Database Portal**: Admin-facing interactive SQL console and table explorer supporting both local SQLite and remote cloud database queries.
 
@@ -88,21 +91,34 @@ graph TD
 
 ---
 
-## Identity, Privacy & Double-Sharing Rooms
+## Identity, Privacy & Resident Onboarding
 
-### 1. Student Registration & Multi-Roommate Identity
+### 1. Rotating Physical QR Verification & Kiosk Token Gating
+* **Physical Presence Gating**: To eliminate spam registrations and rogue signups, resident registration is strictly gated by a dynamic QR code displayed on a tablet kiosk at the hostel laundry desk.
+* **HMAC-SHA256 Token Signature**:
+  $$\text{Token} = \text{hostel\_id} \,.\, \text{timestamp} \,.\, \text{nonce} \,.\, \text{HMAC}_{24}(\dots)$$
+* **Rotation & Grace Window**: The kiosk rotates tokens every **60 seconds**. Once scanned by a student phone, the backend grants a **360-second grace window** to complete the form without rushing.
+* **Direct Signup Blocking**: Visiting `/login` directly only permits existing residents to sign in. Attempting to access registration without scanning the desk QR displays a guidance screen ("Hostel Desk QR Required").
+
+### 2. Administrator Approval Workflow & Authorization Gates
+* **Pending Status Upon Registration**: When a resident completes the QR-verified registration form, the account is created with `status: "pending"`.
+* **Login Enforcement (HTTP 403)**: Unapproved accounts cannot sign in or reserve machines. Attempted logins receive a `403 Forbidden` response explaining that the request is awaiting hostel administrator approval.
+* **Admin Review Queue**: The Operator Console displays a live **`PENDING_REGISTRATION_REQUESTS`** queue card showing applicant name, room number, mobile phone, and local submission timestamp.
+* **1-Click Authorization**: Clicking **`✓ Approve Resident`** transitions the student to `status: "approved"`, stamps `approved_at`, and unblocks immediate login and machine reservation. Clicking **`✕ Reject`** transitions the account to `rejected`.
+
+### 3. Student Registration & Multi-Roommate Identity
 * **Composite Identification**: Uniqueness is keyed on `(Student Name, Room Number)`.
 * In **double-sharing and multi-sharing rooms**, roommates share the same Room Number (e.g. `Room B-214`) while maintaining individual accounts, passwords (SHA-256 with salt), and booking histories.
 * Sign-in accepts `Room Number` + `Password`, with optional `Student Name` disambiguation for roommates.
 
-### 2. Privacy Masking vs. Admin Audit
+### 4. Privacy Masking vs. Admin Audit
 * **Public / Student View (`GET /api/machines`)**:
   * Anonymizes active occupants (`"Occupied by Resident"`).
   * Shows cycle duration, countdown timers, and live power status without exposing personal names.
 * **Operator Console (`GET /api/admin/machines`)**:
-  * Unmasks full student details (**Name**, **Room Number**, **Email**, **Start Time**, **Queue Waitlist**) for warden audit logs.
+  * Unmasks full student details (**Name**, **Room Number**, **Mobile Phone**, **Start Time**, **Queue Waitlist**) for warden audit logs.
 
-### 3. Targeted Separate Pings
+### 5. Targeted Separate Pings
 * **`🔔 Ping Occupant`**: Dispatches a direct `nudge_alert` to the resident holding the booking to collect finished clothes.
 * **`🛡️ Alert Admin`**: Escalates unattended laundry or hardware issues directly to the hostel operator console with room metadata.
 

@@ -1,8 +1,9 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue'
-import { Settings, X, Sun, Moon, KeyRound, ArrowUpRight, School, Lock, Building2, Trash2, AlertTriangle } from 'lucide-vue-next'
+import { Settings, X, Sun, Moon, KeyRound, ArrowUpRight, School, Lock, Building2, Trash2, AlertTriangle, Globe } from 'lucide-vue-next'
 
 const { institutionName, hostelName } = useHostelBranding()
+const { activeTimezoneLabel } = useAppTimezone()
 const config = useRuntimeConfig()
 const apiBase = config.public?.apiBaseUrl || 'http://localhost:8000'
 
@@ -211,6 +212,24 @@ const handleDeleteProfile = async () => {
           <p class="text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed px-0.5">
             Hostel assignments are managed by administration and cannot be modified by residents.
           </p>
+        </div>
+
+        <!-- Regional Timezone -->
+        <div class="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+          <div class="flex items-center gap-1.5">
+            <Globe class="w-3.5 h-3.5 text-amber-500" />
+            <label class="text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500">
+              Regional Timezone & Clock
+            </label>
+          </div>
+          <div class="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-1">
+            <div class="flex items-center justify-between text-xs font-bold">
+              <span class="text-slate-900 dark:text-white">{{ activeTimezoneLabel }}</span>
+            </div>
+            <p class="text-[10px] text-slate-400 dark:text-slate-500">
+              Managed by Hostel Admin. Telemetry and booking clocks display in this local time.
+            </p>
+          </div>
         </div>
 
         <!-- Quick Navigation Shortcuts -->

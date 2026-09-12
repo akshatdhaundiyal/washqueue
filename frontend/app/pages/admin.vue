@@ -853,9 +853,11 @@ const exportQueryResults = () => {
               :users-loading="usersLoading"
               :is-ws-connected="isWsConnected"
               :dark-mode="darkMode"
+              :admin-pin="inputPin"
               @refresh-users="fetchAllUsers"
               @lock-session="lockAdminSession"
             />
+
           </div>
         </main>
       </div>
