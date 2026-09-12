@@ -18,8 +18,16 @@ import sqlite3
 def set_sqlite_pragma(dbapi_connection, connection_record):
     if isinstance(dbapi_connection, sqlite3.Connection):
         cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        import os
+        if os.path.exists("/.dockerenv"):
+            cursor.execute("PRAGMA journal_mode=DELETE")
+        else:
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+            except Exception:
+                cursor.execute("PRAGMA journal_mode=DELETE")
         cursor.close()
 
 # Async session factory

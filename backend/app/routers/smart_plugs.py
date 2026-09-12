@@ -279,7 +279,10 @@ async def get_plug_telemetry_history(
 
     series = [
         TelemetryHistoryPoint(
-            timestamp=r.recorded_at.isoformat() if r.recorded_at else "",
+            timestamp=(
+                (r.recorded_at.replace(tzinfo=datetime.timezone.utc) if r.recorded_at.tzinfo is None else r.recorded_at)
+                .isoformat().replace("+00:00", "Z")
+            ) if r.recorded_at else "",
             power_w=round(r.power_w or 0.0, 1),
             voltage_v=round(r.voltage_v, 1) if r.voltage_v is not None else None,
             current_ma=round(r.current_ma, 1) if r.current_ma is not None else None,

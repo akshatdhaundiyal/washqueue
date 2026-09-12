@@ -1,8 +1,7 @@
 """
-WashQueue Continuous Smart Plug Background Telemetry Logger
-Silently polls the smart plug in the background, writing all live telemetry
-readings (voltage, current, power, energy, switch) directly into SQLite
-(washqueue.db) and a rotating daily CSV log file.
+WashQueue Continuous Smart Plug Background Telemetry Logger [ARCHIVED]
+NOTE: Superseded by scripts/record_telemetry.py which connects via native
+WebSocket with auto-reconnect, CSV flushing, and auto-calibration.
 """
 
 import os
@@ -16,7 +15,8 @@ import logging
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Base dir is backend/ (three levels up from backend/scripts/archive/)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
 
 from dotenv import load_dotenv

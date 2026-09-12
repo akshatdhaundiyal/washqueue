@@ -9,7 +9,7 @@
 - **Frontend**: Nuxt 4 (Vue 3), Tailwind CSS (`darkMode: 'class'`), Native WebSocket Client (`useLocalWebSocket`), Lucide Icons, `@supabase/supabase-js` (Cloud fallback)
 - **Typography Engine**: **Plus Jakarta Sans** (Primary UI & headings) paired with **JetBrains Mono** (`tabular-nums`, live stopwatch, power draws, voltages, telemetry counters, IP/MAC addresses)
 - **Backend Engine**: FastAPI, SQLAlchemy 2.0, `aiosqlite`, `asyncpg`, Pydantic v2, `tinytuya`
-- **Smart Plug Integration**: Provider-agnostic local socket polling over LAN (port 6668, 1-second interval, zero cloud fees, 2-minute soak debounce) with automatic Tuya OpenAPI cloud fallback
+- **Smart Plug Integration**: Provider-agnostic local socket polling over LAN (persistent connection pool on port 6668, 1-second interval, zero cloud fees, per-device `asyncio.Lock`, adaptive timeout sensitivity, 3-miss grace buffer) with automatic 15-second cooldown Tuya OpenAPI cloud fallback
 - **Database Architecture**: Embedded SQLite (`washqueue.db`) primary database + Event-Driven Cloud Sync Engine with an offline replay queue
 - **Python Project Management**: Powered natively by **`uv`** (`pyproject.toml`, `uv.lock`, `uv run`)
 
@@ -75,7 +75,13 @@ For database portal documentation, see [docs/database_portal.md](docs/database_p
 - **Public Dashboard (`/`)**: Displays anonymized status (**`"Occupied by Resident"`**) to protect privacy while showing live cycle progress and power state.
 - **Operator Console (`/admin`)**: Unmasks exact student identities (**Name**, **Room Number**, **Start Time**) for management auditing.
 
-### 9. Smart Plug Telemetry & Visual Threshold Calibration Studio
+### 9. Smart Plug Telemetry, Resilience Engine & Visual Calibration Studio
+- **Persistent Connection Pooling**: Reuses established TCP connections on port 6668 via `_device_pool`, eliminating socket churn and slashing query latency to ~15ms.
+- **Per-Device Concurrency Serialization**: `asyncio.Lock` per plug serializes background polling and manual switch toggles to eliminate intra-process port collisions.
+- **Adaptive Timeout Sensitivity**: Fast 1.5s probe on persistent sockets, expanding to 3.5s with retry on connection loss.
+- **3-Miss Grace Buffer**: Requires 3 consecutive failed ticks before marking a plug offline in the UI, eliminating transient Wi-Fi drops and sleep wake-up flicker.
+- **15-Second Cloud Cooldown**: Seamlessly falls back to Tuya Cloud API during mobile app usage, avoiding port hammering.
+- **Safe Physical NIC Binding**: `BoundOutletDevice` binds specifically to the local physical NIC (`192.168.1.12`), bypassing VPN / Tailscale route metric overrides with zero global socket monkey-patching.
 - **Card-Tap Resident Telemetry**: Tapping any washing machine card on the student dashboard pops up its **4-hour historical power consumption curve**.
 - **Visual Threshold Calibration Studio (Admin UI)**:
   - Accessible via `/admin` -> **IoT & Smart Plugs** -> **Visual Calibration Studio**.
@@ -86,11 +92,11 @@ For database portal documentation, see [docs/database_portal.md](docs/database_p
 - **Dual-Series Curves**:
   - **🟢 Local LAN / WebSocket (`#10b981`)**: Smooth solid emerald gradient curve for ~1-second high-density local telemetry (<20ms latency).
   - **🔷 Tuya Cloud Fallback (`#06b6d4`, `◆`)**: Cyan diamond point markers and dashed connector lines.
-- **Subnet Interface Auto-Binding**: Intelligent local NIC auto-discovery bypasses VPN / Tailscale route metric overrides.
 - **Crash-Resilient Persistence**: Primary database (`washqueue.db`) runs in SQLite **WAL mode** (`journal_mode=WAL`), ensuring atomic disk sync and concurrent non-blocking reads/writes.
 
-### 10. CLI Telemetry Logging & Algorithm Tuning Suite
-- **`record_telemetry.py`**: High-frequency 1s telemetry recorder that streams live metrics, logs to CSV & SQLite, and auto-calibrates thresholds upon cycle completion.
+### 10. CLI Telemetry Logging & Smart Dual-Mode Suite
+- **`read_plug.py`**: Instant live plug diagnostic tool with **smart dual-mode**—streams from active backend API or direct socket if backend is stopped.
+- **`record_telemetry.py`**: High-frequency 1s telemetry recorder that streams live metrics, logs to CSV & SQLite, and auto-calibrates thresholds upon cycle completion (with backend stream auto-routing).
 - **`simulate_wash_cycle.py`**: Synthetic cycle generator creating realistic physics-based power curves for multi-stage washers.
 - **`tune_from_csv.py`**: Offline replay tool to benchmark debounce and threshold combinations against any saved CSV run.
 - **`export_telemetry.py`**: Quick dump tool for exporting historical SQLite telemetry to CSV or JSON.

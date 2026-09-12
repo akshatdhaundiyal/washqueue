@@ -28,93 +28,19 @@ const anonymousBuzzEnabled = ref(true)
 
 // User's Claimed Active Appliance
 const myMachine = ref({
-  claimed: true,
-  id: 'W-02',
-  name: 'SpeedQueen Washer 02',
+  claimed: false,
+  id: null,
+  name: '',
   location: 'Block B • 2nd Floor',
-  isOn: true,
-  runningMinutes: 28,
-  powerDraw: '340W',
-  startedAt: '8:42 AM',
-  notifyWhenOff: true
+  isOn: false,
+  runningMinutes: 0,
+  powerDraw: '0W',
+  startedAt: '',
+  notifyWhenOff: false
 })
 
 // State of all appliances with inline buzz counters & smart telemetry
-const machines = ref([
-  {
-    id: 'W-01',
-    name: 'Washer 01 (LG Heavy)',
-    type: 'washer',
-    location: 'Block B • 2nd Floor',
-    isOn: true,
-    status: 'in-use', // 'available' | 'in-use' | 'uncollected'
-    runningMinutes: 46,
-    powerDraw: '320W',
-    nudgesSent: 1,
-    myBuzzed: false
-  },
-  {
-    id: 'W-02',
-    name: 'SpeedQueen Washer 02',
-    type: 'washer',
-    location: 'Block B • 2nd Floor',
-    isOn: true,
-    status: 'in-use',
-    runningMinutes: 28,
-    powerDraw: '340W',
-    nudgesSent: 0,
-    myBuzzed: false
-  },
-  {
-    id: 'W-03',
-    name: 'Washer 03 (IFB Eco)',
-    type: 'washer',
-    location: 'Block B • 2nd Floor',
-    isOn: false,
-    status: 'available',
-    runningMinutes: 0,
-    powerDraw: '0W',
-    nudgesSent: 0,
-    myBuzzed: false
-  },
-  {
-    id: 'W-04',
-    name: 'Washer 04 (Samsung)',
-    type: 'washer',
-    location: 'Block B • 2nd Floor',
-    isOn: true,
-    status: 'in-use',
-    runningMinutes: 12,
-    powerDraw: '280W',
-    nudgesSent: 0,
-    myBuzzed: false
-  },
-  {
-    id: 'D-01',
-    name: 'Dryer Pro 01 (Whirlpool)',
-    type: 'dryer',
-    location: 'Block B • 2nd Floor',
-    isOn: false,
-    status: 'uncollected',
-    runningMinutes: 0,
-    finishedAgoMin: 18,
-    powerDraw: '0W',
-    nudgesSent: 3,
-    myBuzzed: false
-  },
-  {
-    id: 'D-02',
-    name: 'Dryer Pro 02 (Siemens)',
-    type: 'dryer',
-    location: 'Block B • 2nd Floor',
-    isOn: false,
-    status: 'available',
-    runningMinutes: 0,
-    powerDraw: '0W',
-    nudgesSent: 0,
-    myBuzzed: false
-  }
-])
+const machines = ref([])
 
 const filterTabs = [
   { id: 'all', label: 'All' },
@@ -140,15 +66,21 @@ const formattedDate = computed(() => {
   return d.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 })
 
-// Optional background synchronization if backend API is reachable
+// Synchronize machine status and active bookings with backend API
 const fetchBackendData = async () => {
   try {
     const data = await $fetch(`${apiBase}/api/machines`)
-    if (data && Array.isArray(data) && data.length > 0) {
+    if (data && Array.isArray(data)) {
       machines.value = data.map((m) => {
         const powerW = m.latest_power_w ?? 0
         const isRunning = m.status === 'in_use' || powerW >= 10.0
-        const isUncollected = m.status === 'uncollected'
+        const isUncollected = m.status === 'idle_full' || m.status === 'uncollected'
+        
+        let elapsed = 0
+        if (m.active_booking?.started_at) {
+          elapsed = Math.max(0, Math.floor((Date.now() - new Date(m.active_booking.started_at).getTime()) / 60000))
+        }
+
         return {
           id: m.id,
           name: m.name,
@@ -156,13 +88,42 @@ const fetchBackendData = async () => {
           location: m.location || 'Block B • 2nd Floor',
           isOn: isRunning,
           status: isUncollected ? 'uncollected' : isRunning ? 'in-use' : 'available',
-          runningMinutes: m.running_minutes ?? (isRunning ? 28 : 0),
-          finishedAgoMin: m.finished_ago_min ?? (isUncollected ? 15 : undefined),
+          runningMinutes: elapsed,
+          finishedAgoMin: isUncollected ? (m.finished_ago_min || 0) : undefined,
           powerDraw: `${powerW.toFixed(0)}W`,
           nudgesSent: m.nudges_sent ?? 0,
-          myBuzzed: false
+          myBuzzed: false,
+          active_booking: m.active_booking,
+          queue: m.queue || []
         }
       })
+
+      // Check if current user has an active booking on any machine
+      const storedUser = typeof localStorage !== 'undefined' ? localStorage.getItem('washqueue_student_user') : null
+      let currentUserId = null
+      try {
+        if (storedUser) currentUserId = JSON.parse(storedUser)?.id
+      } catch (e) {}
+
+      const myActiveMachine = data.find(m => m.active_booking && currentUserId && m.active_booking.user_id === currentUserId)
+      if (myActiveMachine && myActiveMachine.active_booking) {
+        const started = new Date(myActiveMachine.active_booking.started_at)
+        const elapsedMin = Math.max(0, Math.floor((Date.now() - started.getTime()) / 60000))
+        const pwr = myActiveMachine.latest_power_w ?? 0
+        myMachine.value = {
+          claimed: true,
+          id: myActiveMachine.id,
+          name: myActiveMachine.name,
+          location: 'Block B • 2nd Floor',
+          isOn: myActiveMachine.status === 'in_use' || pwr >= 10.0,
+          runningMinutes: elapsedMin,
+          powerDraw: `${pwr.toFixed(0)}W`,
+          startedAt: started.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          notifyWhenOff: true
+        }
+      } else if (!myMachine.value.id || !data.some(m => m.id === myMachine.value.id && m.active_booking)) {
+        myMachine.value.claimed = false
+      }
     }
   } catch (err) {
     // Graceful offline fallback
@@ -196,8 +157,25 @@ onUnmounted(() => {
   if (toastTimer) clearTimeout(toastTimer)
 })
 
+const getCurrentUser = () => {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const raw = localStorage.getItem('washqueue_student_user')
+    return raw ? JSON.parse(raw) : null
+  } catch (e) {
+    return null
+  }
+}
+
 // Claim & Book an available machine
 const handleClaimMachine = async (machine) => {
+  const currentUser = getCurrentUser()
+  if (!currentUser || !currentUser.id) {
+    showToast('Please sign in to claim a machine.')
+    navigateTo('/login')
+    return
+  }
+
   const startTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
   machines.value = machines.value.map((m) =>
@@ -230,7 +208,7 @@ const handleClaimMachine = async (machine) => {
   try {
     await $fetch(`${apiBase}/api/machines/${machine.id}/claim`, {
       method: 'POST',
-      body: { user_id: 'akshat-student', duration_minutes: 45 }
+      body: { user_id: currentUser.id, duration_minutes: 45 }
     })
   } catch (e) {
     // Offline local state already updated
@@ -240,6 +218,7 @@ const handleClaimMachine = async (machine) => {
 // Release active load
 const handleReleaseMachine = async () => {
   const machineId = myMachine.value.id
+  const currentUser = getCurrentUser()
 
   if (machineId) {
     machines.value = machines.value.map((m) =>
@@ -263,11 +242,11 @@ const handleReleaseMachine = async () => {
 
   showToast('Released machine. Marked as available.')
 
-  if (machineId) {
+  if (machineId && currentUser?.id) {
     try {
       await $fetch(`${apiBase}/api/machines/${machineId}/clear`, {
         method: 'POST',
-        body: { user_id: 'akshat-student' }
+        body: { user_id: currentUser.id }
       })
     } catch (e) {
       // Offline local state already updated
@@ -277,6 +256,8 @@ const handleReleaseMachine = async () => {
 
 // Inline Buzz / Nudge Trigger
 const handleSendBuzz = async (machineId, machineName, isUncollected = false) => {
+  const currentUser = getCurrentUser()
+
   machines.value = machines.value.map((m) =>
     m.id === machineId
       ? { ...m, nudgesSent: (m.nudgesSent || 0) + 1, myBuzzed: true }
@@ -292,7 +273,7 @@ const handleSendBuzz = async (machineId, machineName, isUncollected = false) => 
   try {
     await $fetch(`${apiBase}/api/machines/${machineId}/ping`, {
       method: 'POST',
-      body: { user_id: 'akshat-student', target: 'occupant' }
+      body: { user_id: currentUser?.id, target: 'occupant' }
     })
   } catch (e) {
     // Offline local state already updated
@@ -338,73 +319,31 @@ const openMachinePowerGraph = async (machine) => {
 
   try {
     const data = await $fetch(`${apiBase}/api/machines/${machine.id}/power-history?hours=4`)
-    if (data && data.series && data.series.length > 0) {
-      machinePowerHistory.value = data
-    } else {
-      machinePowerHistory.value = generateSimulatedPowerHistory(machine)
-    }
+    machinePowerHistory.value = data
   } catch (err) {
-    machinePowerHistory.value = generateSimulatedPowerHistory(machine)
+    machinePowerHistory.value = {
+      plug_id: machine.id,
+      plug_name: `${machine.name} • Smart Plug Node`,
+      hours: 4,
+      peak_power_w: 0.0,
+      avg_power_w: 0.0,
+      local_points_count: 0,
+      cloud_points_count: 0,
+      series: []
+    }
   } finally {
     historyLoading.value = false
   }
 }
 
-// Generate realistic 4-hour telemetry time-series curve for machines
-const generateSimulatedPowerHistory = (machine) => {
-  const now = Date.now()
-  const fourHoursMs = 4 * 60 * 60 * 1000
-  const points = []
-  const stepMs = 3 * 60 * 1000 // every 3 minutes = 80 data points
-  const isRunning = machine.isOn || machine.status === 'in-use'
-  const isDryer = machine.type === 'dryer' || machine.name?.toLowerCase().includes('dryer')
-  const basePeak = isDryer ? 1750 : 340
-
-  let t = now - fourHoursMs
-  while (t <= now) {
-    const minutesAgo = Math.round((now - t) / 60000)
-    let powerW = 0.0
-
-    if (isRunning && minutesAgo <= (machine.runningMinutes || 28)) {
-      // Active wash cycle happening right now
-      const phase = minutesAgo % 12
-      if (phase < 3) powerW = Math.round(basePeak * 0.9 + Math.random() * 30) // Motor agitation
-      else if (phase < 5) powerW = Math.round(basePeak * 0.15 + Math.random() * 15) // Soak
-      else if (phase < 9) powerW = Math.round(basePeak * 0.98 + Math.random() * 25) // High-speed spin
-      else powerW = Math.round(basePeak * 0.45 + Math.random() * 20) // Rinse
-    } else if (minutesAgo >= 110 && minutesAgo <= 170) {
-      // Prior cycle 2-3 hours ago
-      const phase = minutesAgo % 10
-      if (phase < 6) powerW = Math.round(basePeak * 0.85 + Math.random() * 40)
-      else powerW = Math.round(5 + Math.random() * 10)
-    } else {
-      // Off / Standby state
-      powerW = Math.random() < 0.15 ? Math.round(1.5 + Math.random() * 1.5) : 0.0
-    }
-
-    points.push({
-      timestamp: new Date(t).toISOString(),
-      power_w: powerW,
-      voltage_v: Math.round(230 + Math.random() * 8),
-      current_ma: Math.round(powerW > 0 ? (powerW / 230) * 1000 : 0),
-      source: 'local'
-    })
-    t += stepMs
-  }
-
-  const powers = points.map(p => p.power_w)
-  const peak = Math.max(...powers, 10)
-  const avg = powers.reduce((a, b) => a + b, 0) / powers.length
-
-  return {
-    plug_id: machine.id,
-    plug_name: `${machine.name} • Smart Plug Node`,
-    hours: 4,
-    peak_power_w: Math.round(peak),
-    avg_power_w: Math.round(avg),
-    local_points_count: points.length,
-    cloud_points_count: 0,
-    series: points
+// Background auto-refresh for resident machine power graph
+const refreshMachinePowerHistory = async () => {
+  if (!isPowerGraphOpen.value || !selectedMachineForGraph.value?.id) return
+  try {
+    const data = await $fetch(`${apiBase}/api/machines/${selectedMachineForGraph.value.id}/power-history?hours=4`)
+    machinePowerHistory.value = data
+  } catch (err) {
+    // silent fallback
   }
 }
 
@@ -606,6 +545,7 @@ const { isConnected: isWsConnected } = useLocalWebSocket(apiBase, (event) => {
       :loading="historyLoading"
       :dark-mode="darkMode"
       @close="isPowerGraphOpen = false"
+      @refresh="refreshMachinePowerHistory"
     />
   </div>
 </template>

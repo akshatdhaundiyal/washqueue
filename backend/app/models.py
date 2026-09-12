@@ -1,6 +1,20 @@
 import uuid
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, text, func, Uuid, UniqueConstraint, Index
+import datetime
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, text, func, Uuid, UniqueConstraint, Index, TypeDecorator
 from sqlalchemy.orm import relationship
+
+class UTCDateTime(TypeDecorator):
+    """
+    Ensures that datetimes are always timezone-aware (UTC) when read from
+    SQLite (which does not natively store timezone offsets).
+    """
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=datetime.timezone.utc)
+        return value
 
 try:
     from app.database import Base
@@ -24,9 +38,9 @@ class Booking(Base):
     id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     machine_id = Column(Uuid(as_uuid=True), ForeignKey("machines.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Uuid(as_uuid=True), nullable=False)
-    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    estimated_end_at = Column(DateTime(timezone=True), nullable=False)
-    cleared_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(UTCDateTime, nullable=False, server_default=func.now())
+    estimated_end_at = Column(UTCDateTime, nullable=False)
+    cleared_at = Column(UTCDateTime, nullable=True)
 
     machine = relationship("Machine", back_populates="bookings")
 
@@ -36,7 +50,7 @@ class Queue(Base):
     id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     machine_id = Column(Uuid(as_uuid=True), ForeignKey("machines.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Uuid(as_uuid=True), nullable=False)
-    joined_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    joined_at = Column(UTCDateTime, nullable=False, server_default=func.now())
     position = Column(Integer, nullable=False)
     status = Column(String, nullable=False, default="waiting")
 
@@ -63,10 +77,10 @@ class SmartPlug(Base):
     power_threshold_idle = Column(Float, nullable=False, default=5.0)
     debounce_seconds = Column(Integer, nullable=False, default=120)
     is_online = Column(Boolean, nullable=False, default=False)
-    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    last_seen_at = Column(UTCDateTime, nullable=True)
     consecutive_failures = Column(Integer, nullable=False, default=0)
     last_error = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(UTCDateTime, nullable=False, server_default=func.now())
 
     machine = relationship("Machine", back_populates="smart_plug")
     telemetry_readings = relationship("TelemetryReading", back_populates="smart_plug", cascade="all, delete-orphan")
@@ -85,7 +99,7 @@ class TelemetryReading(Base):
     energy_kwh = Column(Float, nullable=True)
     switch_on = Column(Boolean, nullable=True)
     source = Column(String, nullable=True, default="local")  # "local" (socket/WS) or "cloud" (Tuya OpenAPI)
-    recorded_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    recorded_at = Column(UTCDateTime, nullable=False, server_default=func.now())
 
     smart_plug = relationship("SmartPlug", back_populates="telemetry_readings")
 
@@ -102,6 +116,6 @@ class User(Base):
     university = Column(String, nullable=True)
     college = Column(String, nullable=True)
     hostel = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(UTCDateTime, nullable=False, server_default=func.now())
 
 

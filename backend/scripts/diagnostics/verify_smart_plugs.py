@@ -1,7 +1,13 @@
 import asyncio
 import datetime
 import uuid
+import os
+import sys
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
+# Ensure backend root is in sys.path (three levels up from backend/scripts/diagnostics/)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, BASE_DIR)
 
 from app.database import Base
 from app.models import Machine, Booking, Queue, SmartPlug, TelemetryReading, User
@@ -114,7 +120,6 @@ async def run_smart_plug_tests():
         # First tick: should start soak debounce timer, but machine remains 'in_use'
         await process_plug_telemetry(db, plug)
         await db.commit()
-
 
         m_status = (await MachineRepository.get_by_id(db, m1.id)).status
         print(f"Tick 1 (2W power): Machine status: '{m_status}' (Debounce timer started)")

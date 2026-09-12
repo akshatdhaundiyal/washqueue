@@ -10,7 +10,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['check-overdue', 'force-clear'])
+const emit = defineEmits(['check-overdue', 'force-clear', 'add-machine', 'delete-machine'])
 </script>
 
 <template>
@@ -25,17 +25,44 @@ const emit = defineEmits(['check-overdue', 'force-clear'])
         </p>
       </div>
 
+      <div class="flex items-center gap-2">
+        <button 
+          @click="emit('add-machine')"
+          class="px-4 py-2 bg-emerald-500/15 border border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/25 font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 active:scale-95 shadow-sm"
+          title="Add a new machine to the fleet"
+        >
+          <span>＋ Add Machine</span>
+        </button>
+
+        <button 
+          @click="emit('check-overdue')"
+          class="px-4 py-2 bg-amber-500/15 border border-amber-500/40 text-amber-500 hover:bg-amber-500/25 font-mono font-bold text-xs rounded-xl transition flex items-center gap-2 active:scale-95"
+          title="Scan all active machines and shift overdue cycles to idle_full"
+        >
+          <span>⚡ Check Overdue Cycles</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div 
+      v-if="machines.length === 0"
+      class="text-center py-16 px-4 rounded-3xl border"
+      :class="darkMode ? 'bg-[#121824] border-white/5 text-slate-400' : 'bg-white border-slate-200 text-slate-500'"
+    >
+      <div class="text-4xl mb-3">🧺</div>
+      <h3 class="font-mono font-bold text-sm mb-1" :class="darkMode ? 'text-white' : 'text-slate-900'">NO_MACHINES_CONFIGURED</h3>
+      <p class="font-mono text-xs max-w-sm mx-auto mb-4">No washing machines or dryers are currently active in your fleet.</p>
       <button 
-        @click="emit('check-overdue')"
-        class="px-4 py-2 bg-amber-500/15 border border-amber-500/40 text-amber-500 hover:bg-amber-500/25 font-mono font-bold text-xs rounded-xl transition flex items-center gap-2 active:scale-95"
-        title="Scan all active machines and shift overdue cycles to idle_full"
+        @click="emit('add-machine')"
+        class="px-4 py-2 bg-emerald-500 text-slate-900 font-mono font-bold text-xs rounded-xl transition hover:bg-emerald-400 active:scale-95"
       >
-        <span>⚡ Check Overdue Cycles</span>
+        ＋ Add Your First Machine
       </button>
     </div>
 
     <!-- Machines Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
       <div 
         v-for="machine in machines" 
         :key="machine.id"
@@ -44,9 +71,18 @@ const emit = defineEmits(['check-overdue', 'force-clear'])
       >
         <div>
           <div class="flex items-center justify-between mb-3">
-            <span class="font-mono font-extrabold text-sm" :class="darkMode ? 'text-white' : 'text-slate-900'">
-              {{ machine.name }}
-            </span>
+            <div class="flex items-center gap-2">
+              <span class="font-mono font-extrabold text-sm" :class="darkMode ? 'text-white' : 'text-slate-900'">
+                {{ machine.name }}
+              </span>
+              <button
+                @click="emit('delete-machine', machine.id)"
+                class="text-slate-400 hover:text-rose-400 transition p-1 rounded-md hover:bg-rose-500/10 text-xs"
+                title="Delete Machine"
+              >
+                🗑
+              </button>
+            </div>
             <span 
               class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase border"
               :class="{
@@ -68,7 +104,7 @@ const emit = defineEmits(['check-overdue', 'force-clear'])
               </div>
               <div class="flex items-center justify-between">
                 <span :class="darkMode ? 'text-slate-400' : 'text-slate-500'">Room:</span>
-                <span class="font-bold text-sky-500">{{ machine.active_booking.room_number || 'B-214' }}</span>
+                <span class="font-bold text-sky-500">{{ machine.active_booking.room_number || '—' }}</span>
               </div>
               <div class="flex items-center justify-between text-[11px]">
                 <span :class="darkMode ? 'text-slate-400' : 'text-slate-500'">Started:</span>

@@ -13,6 +13,7 @@ dependencies = [
     "tinytuya>=1.13.0",
     "aiosqlite>=0.20.0",
     "tuya-connector-python>=0.1.2",
+    "pandas>=3.0.5",
 ]
 
 [tool.hatch.build.targets.wheel]

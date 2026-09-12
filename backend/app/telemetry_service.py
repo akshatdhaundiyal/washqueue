@@ -54,21 +54,27 @@ async def process_plug_telemetry(db: AsyncSession, plug: SmartPlug):
             protocol_version=plug.protocol_version
         )
         
-        now = datetime.datetime.now(datetime.timezone.utc)
-        is_online = reading.raw_dps is not None and "error" not in reading.raw_dps
+        now = getattr(reading, "timestamp", None) or datetime.datetime.now(datetime.timezone.utc)
+        reading_ok = reading.raw_dps is not None and "error" not in reading.raw_dps
         
-        # 1. Update plug online & health state
-        plug.is_online = is_online
-        if is_online:
+        # 1. Update plug online & health state with 3-miss grace buffer
+        if reading_ok:
+            plug.is_online = True
             plug.last_seen_at = now
             plug.consecutive_failures = 0
             plug.last_error = None
         else:
             plug.consecutive_failures = (plug.consecutive_failures or 0) + 1
+            # Only transition is_online to False once consecutive failures reach threshold (3)
+            if plug.consecutive_failures >= 3:
+                plug.is_online = False
+
             if isinstance(reading.raw_dps, dict) and "error" in reading.raw_dps:
                 plug.last_error = str(reading.raw_dps["error"])
             else:
                 plug.last_error = "Device unreachable"
+
+        is_online = plug.is_online
 
         # 2. Record telemetry reading if online or error payload
         source_tag = getattr(reading, "source", "local") or "local"

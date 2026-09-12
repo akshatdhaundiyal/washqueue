@@ -457,16 +457,16 @@ const filteredUsers = computed(() => {
               <td class="px-4 py-3">
                 <div class="space-y-0.5">
                   <div class="font-bold text-xs" :class="darkMode ? 'text-slate-200' : 'text-slate-800'">
-                    {{ user.hostel || 'Block B • Aryabhatta Hall' }}
+                    {{ user.hostel || '—' }}
                   </div>
-                  <div class="text-[10px] text-slate-400 truncate max-w-[200px]" :title="user.university || 'Apex Institute of Technology'">
-                    {{ user.university || 'Apex Institute of Technology' }}
+                  <div class="text-[10px] text-slate-400 truncate max-w-[200px]" :title="user.university || '—'">
+                    {{ user.university || '—' }}
                   </div>
                 </div>
               </td>
               <td class="px-4 py-3 text-sky-500 font-bold">
                 <div class="flex items-center gap-1.5">
-                  <span>{{ user.room_number || 'Room B-214' }}</span>
+                  <span>{{ user.room_number ? `Room ${user.room_number}` : '—' }}</span>
                   <span 
                     v-if="users.filter(u => u.room_number && u.room_number === user.room_number).length > 1"
                     class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"

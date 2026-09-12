@@ -1,5 +1,19 @@
 <script setup>
+import { ref, onMounted } from 'vue'
 import { Info } from 'lucide-vue-next'
+
+const { hostelName } = useHostelBranding()
+
+const studentUser = ref(null)
+
+onMounted(() => {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('washqueue_student_user')
+      studentUser.value = raw ? JSON.parse(raw) : null
+    } catch (e) {}
+  }
+})
 
 const props = defineProps({
   myMachine: {
@@ -27,9 +41,11 @@ const props = defineProps({
         class="w-24 h-24 rounded-full mx-auto object-cover ring-4 ring-slate-100 dark:ring-slate-700 mb-3"
         alt="Avatar"
       />
-      <h3 class="font-black text-2xl text-slate-900 dark:text-white">Akshat Dhaundiyal</h3>
+      <h3 class="font-black text-2xl text-slate-900 dark:text-white">
+        {{ studentUser?.name || 'Resident' }}
+      </h3>
       <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-        Room 214 • Block B Resident
+        {{ studentUser?.room_number ? `Room ${studentUser.room_number}` : 'Registered Resident' }} • {{ studentUser?.hostel || hostelName }}
       </p>
 
       <div class="grid grid-cols-2 gap-3 mt-6">

@@ -50,7 +50,7 @@ This document outlines the milestones and key checkpoints for developing, valida
 - [x] Containerize backend with `Dockerfile` using multi-stage `uv sync`.
 
 ## Milestone 9: High-Speed Live Telemetry & Real-Time WebSockets
-- [x] Optimize background telemetry polling loop to **1-second interval** (`TELEMETRY_POLL_INTERVAL=1`).
+- [x] Optimize background telemetry polling loop to **2-second interval** (`TELEMETRY_POLL_INTERVAL=2`).
 - [x] Implement real-time `telemetry_update` broadcast over WebSocket (`/ws`) delivering sub-10ms instantaneous telemetry pushes.
 - [x] Build live aggregate telemetry banner in Admin portal (Total Load in Watts, Grid Voltage, Online Nodes, Active Running Machines).
 - [x] Provide color-coded instantaneous telemetry cards per plug (Watts, Volts, Current, Energy) with manual refresh and cloud auto-discovery.
@@ -189,6 +189,18 @@ This document outlines the milestones and key checkpoints for developing, valida
   - Expanded to **6 real-world appliance profile presets** (Top-Load Deep Soak, Front-Load Inverter DD, Front-Load Heated, Compact Washer, Commercial Dryer, Custom).
   - Maintained interactive drag-and-drop horizontal threshold guide lines directly on the SVG power canvas.
 - [x] Verified complete backend and frontend production builds (0 errors).
+
+## Milestone 26: Socket Churn Elimination, Concurrency Locking & Adaptive Timeout Sensitivity Engine
+- [x] Diagnosed "Device Unreachable" root cause: Tuya single-TCP socket limit (port 6668), `TIME_WAIT` TCB depletion, 802.11 DTIM sleep wake-up delays, and mobile app LAN lockouts.
+- [x] Implemented Persistent Connection Pooling in `TuyaLocalProvider` via module-level cache `_device_pool` with `set_socketPersistent(True)` and `set_socketNODELAY(True)`, eliminating socket churn and slashing query latency to ~15ms.
+- [x] Implemented Adaptive Timeout Sensitivity: 1.5s fast probe for persistent open sockets; 3.5s timeout with 2 retries and 0.2s delay for fresh connections and re-negotiations.
+- [x] Implemented 3-Miss Grace Buffer in `telemetry_service.py`: Requires 3 consecutive failed polling ticks before transitioning `plug.is_online = False`, completely eliminating UI online/offline badge flickering.
+- [x] Built Collision Cooldown Engine: 15-second cooldown window triggered on local socket conflicts (e.g. mobile app holding port 6668); routes traffic seamlessly through Tuya Cloud OpenAPI during cooldown before executing a quiet local probe.
+- [x] Implemented Per-Device Asynchronous Locking: Wrapped device operations in `get_device_lock(device_id)` to serialize background polling and manual `/switch` toggles.
+- [x] Created `BoundOutletDevice` subclassing `tinytuya.OutletDevice` to bind specifically to physical Wi-Fi NIC (`192.168.1.12`), completely eliminating unsafe global `socket.socket` monkey-patching.
+- [x] Built Smart Dual-Mode into CLI Utilities (`read_plug.py` & `record_telemetry.py`): Automatically checks for running FastAPI backend and streams from local API/WebSocket to eliminate port 6668 competition.
+- [x] Created and verified automated test suite in `backend/tests/test_socket_resilience.py` (7 tests, 100% pass).
+
 
 
 

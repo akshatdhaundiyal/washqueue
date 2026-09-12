@@ -1,5 +1,12 @@
 import asyncio
+import os
+import sys
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
+# Ensure backend root is in sys.path (three levels up from backend/scripts/diagnostics/)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, BASE_DIR)
+
 from app.database import Base
 from app.models import User
 from app.schemas import StudentRegisterRequest, StudentLoginRequest

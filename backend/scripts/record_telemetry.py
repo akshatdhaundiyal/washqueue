@@ -211,7 +211,7 @@ async def main_async():
     parser.add_argument("--ip", default=DEFAULT_IP, help="Plug Local IP address")
     parser.add_argument("--key", default=DEFAULT_KEY, help="Plug Local Key")
     parser.add_argument("--version", default=DEFAULT_VERSION, help="Tuya Protocol Version (default 3.3)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Sampling interval in seconds (default 1.0s)")
+    parser.add_argument("--interval", type=float, default=2.0, help="Sampling interval in seconds (default 2.0s)")
     parser.add_argument("--samples", type=int, default=None, help="Stop after N samples (default: run until Ctrl+C)")
     parser.add_argument("--duration", type=float, default=None, help="Stop after N seconds (default: run until Ctrl+C)")
     parser.add_argument("--machine", default="Washer 1", help="Machine name to link in DB")
@@ -262,78 +262,136 @@ async def main_async():
     start_time = datetime.datetime.now()
     sample_count = 0
 
-    print("\n[*] Starting live high-frequency telemetry polling. Press Ctrl+C to finish & view report.\n")
-    print(f"{'Time':<10} | {'Power (W)':<10} | {'Voltage (V)':<12} | {'Current (mA)':<13} | {'State':<12} | {'Source'}")
-    print("-" * 75)
-    sys.stdout.flush()
-
     running_threshold = 10.0
     idle_threshold = 5.0
     if plug_record:
         running_threshold = plug_record.power_threshold_running or 10.0
         idle_threshold = plug_record.power_threshold_idle or 5.0
 
-    try:
-        while True:
-            t_now = datetime.datetime.now()
-            elapsed = (t_now - start_time).total_seconds()
+    print(f"\n[*] Target Running Threshold: {running_threshold} W | Idle Threshold: {idle_threshold} W")
+    print("[*] Starting live high-frequency telemetry logging. Press Ctrl+C to finish & view report.\n")
+    print(f"{'Time':<10} | {'Power (W)':<10} | {'Voltage (V)':<12} | {'Current (mA)':<13} | {'State':<12} | {'Source'}")
+    print("-" * 75)
+    sys.stdout.flush()
 
-            if args.duration and elapsed >= args.duration:
-                print(f"\n[*] Target duration ({args.duration}s) reached.")
-                break
-            if args.samples and sample_count >= args.samples:
-                print(f"\n[*] Target samples ({args.samples}) reached.")
-                break
+    async def handle_sample(t_now, p_w, v_v, c_ma, e_kwh, sw_on, src, store_db=False):
+        nonlocal sample_count
+        elapsed = (t_now - start_time).total_seconds()
 
-            telemetry = await provider.get_telemetry(
-                device_id=args.device_id,
-                local_key=args.key,
-                ip_address=args.ip,
-                protocol_version=args.version
+        # Instantaneous state
+        if p_w >= running_threshold:
+            state_str = "RUNNING"
+        elif p_w >= idle_threshold:
+            state_str = "ACTIVE/SOAK"
+        else:
+            state_str = "IDLE/OFF"
+
+        sample_count += 1
+        time_str = t_now.strftime("%H:%M:%S")
+
+        print(f"{time_str:<10} | {p_w:<10.1f} | {v_v:<12.1f} | {c_ma:<13.0f} | {state_str:<12} | {src}")
+        sys.stdout.flush()
+
+        # Write to CSV
+        csv_writer.writerow([
+            t_now.isoformat(), f"{elapsed:.2f}", p_w, v_v, c_ma, e_kwh, sw_on, src, state_str
+        ])
+        csv_file.flush()
+
+        records.append({
+            "timestamp": t_now,
+            "power_w": p_w,
+            "voltage_v": v_v,
+            "current_ma": c_ma,
+            "state": state_str
+        })
+
+        if store_db and not args.no_db and plug_record:
+            await save_telemetry_to_db(
+                plug_record.id, v_v, c_ma, p_w, e_kwh, sw_on, src
             )
 
-            p_w = telemetry.power_w or 0.0
-            v_v = telemetry.voltage_v or 0.0
-            c_ma = telemetry.current_ma or 0.0
-            e_kwh = telemetry.energy_kwh or 0.0
-            sw_on = telemetry.switch_on if telemetry.switch_on is not None else True
-            src = getattr(telemetry, "source", "local") or "local"
-
-            # Basic instantaneous state
-            if p_w >= running_threshold:
-                state_str = "RUNNING"
-            elif p_w >= idle_threshold:
-                state_str = "ACTIVE/SOAK"
-            else:
-                state_str = "IDLE/OFF"
-
-            sample_count += 1
-            time_str = t_now.strftime("%H:%M:%S")
-
-            print(f"{time_str:<10} | {p_w:<10.1f} | {v_v:<12.1f} | {c_ma:<13.0f} | {state_str:<12} | {src}")
+    try:
+        # Check if backend WebSocket is reachable
+        backend_connected = False
+        ws_url = "ws://127.0.0.1:8000/ws"
+        try:
+            import websockets
+            import json
+            ws_conn = await asyncio.wait_for(websockets.connect(ws_url), timeout=2.0)
+            backend_connected = True
+            print(f"[*] Connected to live WashQueue Edge WebSocket broadcast ({ws_url}).")
+            print("[*] Streaming telemetry without socket collisions or DB query lag.\n")
+            sys.stdout.flush()
+        except Exception:
+            backend_connected = False
+            print("[*] Backend WebSocket not reachable. Polling plug directly via persistent socket.\n")
             sys.stdout.flush()
 
-            # Write to CSV
-            csv_writer.writerow([
-                t_now.isoformat(), f"{elapsed:.2f}", p_w, v_v, c_ma, e_kwh, sw_on, src, state_str
-            ])
-            csv_file.flush()
+        if backend_connected:
+            target_plug_id = str(plug_record.id) if plug_record else None
+            async with ws_conn as ws:
+                while True:
+                    t_now = datetime.datetime.now()
+                    elapsed = (t_now - start_time).total_seconds()
+                    if args.duration and elapsed >= args.duration:
+                        print(f"\n[*] Target duration ({args.duration}s) reached.")
+                        break
+                    if args.samples and sample_count >= args.samples:
+                        print(f"\n[*] Target samples ({args.samples}) reached.")
+                        break
 
-            records.append({
-                "timestamp": t_now,
-                "power_w": p_w,
-                "voltage_v": v_v,
-                "current_ma": c_ma,
-                "state": state_str
-            })
+                    try:
+                        raw_msg = await asyncio.wait_for(ws.recv(), timeout=5.0)
+                        msg = json.loads(raw_msg)
+                        if msg.get("type") == "telemetry_update":
+                            # Filter by plug ID if known, otherwise take first telemetry packet
+                            msg_plug_id = msg.get("plug_id")
+                            if not target_plug_id or msg_plug_id == target_plug_id:
+                                tel = msg.get("telemetry", {})
+                                p_w = float(tel.get("power_w") or 0.0)
+                                v_v = float(tel.get("voltage_v") or 0.0)
+                                c_ma = float(tel.get("current_ma") or 0.0)
+                                e_kwh = float(tel.get("energy_kwh") or 0.0)
+                                sw_on = tel.get("switch_on", True)
+                                src = tel.get("source", "ws-stream")
+                                await handle_sample(t_now, p_w, v_v, c_ma, e_kwh, sw_on, src, store_db=False)
+                    except asyncio.TimeoutError:
+                        # Heartbeat ping
+                        try:
+                            await ws.send("ping")
+                        except Exception:
+                            print("\n[!] WebSocket disconnected. Switching to direct local socket polling...")
+                            backend_connected = False
+                            break
+        
+        # Fallback to direct polling if backend was not connected or disconnected
+        if not backend_connected:
+            while True:
+                t_now = datetime.datetime.now()
+                elapsed = (t_now - start_time).total_seconds()
+                if args.duration and elapsed >= args.duration:
+                    print(f"\n[*] Target duration ({args.duration}s) reached.")
+                    break
+                if args.samples and sample_count >= args.samples:
+                    print(f"\n[*] Target samples ({args.samples}) reached.")
+                    break
 
-            # Store in DB
-            if not args.no_db and plug_record:
-                await save_telemetry_to_db(
-                    plug_record.id, v_v, c_ma, p_w, e_kwh, sw_on, src
+                telemetry = await provider.get_telemetry(
+                    device_id=args.device_id,
+                    local_key=args.key,
+                    ip_address=args.ip,
+                    protocol_version=args.version
                 )
+                p_w = telemetry.power_w or 0.0
+                v_v = telemetry.voltage_v or 0.0
+                c_ma = telemetry.current_ma or 0.0
+                e_kwh = telemetry.energy_kwh or 0.0
+                sw_on = telemetry.switch_on if telemetry.switch_on is not None else True
+                src = getattr(telemetry, "source", "local") or "local"
 
-            await asyncio.sleep(args.interval)
+                await handle_sample(t_now, p_w, v_v, c_ma, e_kwh, sw_on, src, store_db=True)
+                await asyncio.sleep(args.interval)
 
     except KeyboardInterrupt:
         print("\n\n[*] Recording stopped by user.")

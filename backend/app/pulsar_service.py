@@ -86,15 +86,17 @@ class TuyaPulsarService:
 
             dps_dict = {item.get("code"): item.get("value") for item in status_list if "code" in item}
             
+            cloud_t = data.get("t") or data.get("time")
+            
             if self._loop and self._loop.is_running():
                 asyncio.run_coroutine_threadsafe(
-                    self._process_dps_event(dev_id, dps_dict),
+                    self._process_dps_event(dev_id, dps_dict, cloud_t),
                     self._loop
                 )
         except Exception as e:
             logger.error(f"Error handling Pulsar message: {e}")
 
-    async def _process_dps_event(self, device_id: str, dps: dict):
+    async def _process_dps_event(self, device_id: str, dps: dict, cloud_t: Optional[Any] = None):
         from sqlalchemy import select
 
         async with async_session() as db:
@@ -105,7 +107,15 @@ class TuyaPulsarService:
                 if not plug:
                     return
 
-                now = datetime.datetime.now(datetime.timezone.utc)
+                offset_sec = float(os.getenv("TUYA_CLOUD_TIME_OFFSET_SECONDS", "0.0") or 0.0)
+                if cloud_t:
+                    try:
+                        now = datetime.datetime.fromtimestamp((float(cloud_t) / 1000.0) + offset_sec, tz=datetime.timezone.utc)
+                    except Exception:
+                        now = datetime.datetime.now(datetime.timezone.utc)
+                else:
+                    now = datetime.datetime.now(datetime.timezone.utc)
+
                 plug.is_online = True
                 plug.last_seen_at = now
 
@@ -124,6 +134,7 @@ class TuyaPulsarService:
                     power_w=power_w,
                     energy_kwh=energy_kwh,
                     switch_on=switch_on,
+                    source="cloud",
                     recorded_at=now
                 )
                 db.add(entry)

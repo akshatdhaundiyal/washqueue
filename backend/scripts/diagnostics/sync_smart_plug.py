@@ -6,11 +6,12 @@ import os
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# Add backend directory to sys.path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add backend directory to sys.path (three levels up from backend/scripts/diagnostics/)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, BASE_DIR)
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from app.database import async_session
 from app.tuya_sync_service import TuyaSyncService

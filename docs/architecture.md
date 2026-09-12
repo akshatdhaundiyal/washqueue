@@ -18,7 +18,7 @@ WashQueue uses a **Hybrid Edge-Cloud Architecture**:
      - **Typography Engine**: **Plus Jakarta Sans** for UI/text paired with **JetBrains Mono** (`tabular-nums`) for jitter-free telemetry numbers, stopwatches, wattages, and database tables. High contrast parity guaranteed across both dark and light modes.
    - **FastAPI Engine**: Runs backend logic, PIN authentication, student identity/registration router, provider-agnostic smart plug drivers, and background workers using native **`uv`**.
    - **Embedded SQLite (`washqueue.db`)**: Primary edge database (`sqlite+aiosqlite`) with hardened schema constraints, composite indexing, and health tracking.
-   - **Wipro / Tuya Smart Plug Driver**: High-speed (1-second) local socket telemetry polling over TCP port 6668 via `tinytuya`, with automatic **Tuya Cloud OpenAPI Fallback** when local router client isolation is active.
+   - **Wipro / Tuya Smart Plug Driver & Concurrency Engine**: High-speed (1-second) local socket telemetry polling over TCP port 6668 via `tinytuya`. Features a persistent socket connection pool (`BoundOutletDevice`) to eliminate socket churn, per-device `asyncio.Lock` serialization, adaptive timeout sensitivity (1.5s probe $\rightarrow$ 3.5s reconnect), a 3-miss grace buffer, safe physical NIC binding, and a 15-second collision cooldown with automatic **Tuya Cloud OpenAPI Fallback** when the plug is occupied or router client isolation is active.
    - **Dual Database Portal**: Admin-facing interactive SQL console and table explorer supporting both local SQLite and remote cloud database queries.
 
 2. **Cloud Layer (Secondary - Remote Access, Auto-Sync & Alerts)**:
@@ -111,7 +111,7 @@ graph TD
 ## Data Flows
 
 ### 1. Smart Plug Power Telemetry & 4-Hour Historical Analysis
-1. Background polling worker reads local smart plug socket every **1 second** (`TELEMETRY_POLL_INTERVAL=1`) and tags `source="local"`.
+1. Background polling worker reads local smart plug socket every **2 seconds** (`TELEMETRY_POLL_INTERVAL=2`) and tags `source="local"`.
 2. If TCP socket is blocked by router client isolation, it falls back to Tuya Cloud OpenAPI within 1.5s and tags `source="cloud"`.
 3. If power draw spikes (`>= 10W`), machine status transitions to `in_use`.
 4. If power draw drops (`< 5W`), a 2-minute soak debounce timer begins.

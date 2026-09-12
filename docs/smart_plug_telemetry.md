@@ -20,13 +20,111 @@ This document explains the hardware integration, high-speed telemetry polling, r
                                               └──(Cloud Fallback if Isolated)──> [Tuya Cloud]
 ```
 
-* **1-Second Polling Loop**: The background telemetry worker runs every **1 second** (`TELEMETRY_POLL_INTERVAL=1` in `backend/.env`). Direct local socket queries execute in **~20ms** with zero cloud quota usage and tag `source="local"`.
+* **2-Second Polling Loop**: The background telemetry worker runs every **2 seconds** (`TELEMETRY_POLL_INTERVAL=2` in `backend/.env`). This matches the hardware refresh rate of the BL0937/HLW8012 power measurement IC and avoids FreeRTOS/lwIP heap exhaustion or watchdog timer resets. Direct local socket queries execute in **~15ms–20ms** with zero cloud quota usage and tag `source="local"`.
 * **Sub-10ms WebSocket Broadcast**: Whenever a telemetry reading is recorded, the backend broadcasts a `telemetry_update` message over the open WebSocket connection (`/ws`). Connected browser dashboards update immediately without HTTP polling overhead.
-* **Automatic Cloud Fallback**: If the hostel Wi-Fi router has AP/Client Isolation enabled (blocking direct LAN packets between PC and plug IP), the provider automatically falls back to Tuya Cloud API within ~1.5 seconds and tags `source="cloud"`.
+* **Automatic Cloud Fallback**: If the hostel Wi-Fi router has AP/Client Isolation enabled or the local port is occupied by another client, the provider automatically falls back to Tuya Cloud API and tags `source="cloud"`.
 
 ---
 
-## 3. 4-Hour Historical Power Graph (Local vs. Cloud Differentiable)
+## 3. Socket Churn, Concurrency Collisions & Timeout Sensitivity Engine
+
+### A. The "Device Unreachable on Same Wi-Fi" Paradox (Hardware Root Causes)
+Hostel laundry environments frequently encounter situations where a smart plug is confirmed to be on the exact same Wi-Fi network as the server, yet queries return `Device unreachable` or connection timeouts. Investigation revealed five hardware, operating system, and protocol constraints:
+
+1. **Tuya Single TCP Connection Limitation**:
+   Tuya/Wipro plugs run lightweight microcontrollers (ESP8266, Beken BK7231T/N, or Realtek RTL8710) with a minimal TCP/IP stack (LwIP). Firmware strictly allows **only ONE active TCP connection on port `6668`** at a time. If the official **Smart Life**, **Tuya**, or **Wipro** app is open on any smartphone on the Wi-Fi, the app establishes a direct local LAN connection, rejecting or dropping all incoming TCP `SYN` packets from the PC.
+2. **Microcontroller Socket Churn & `TIME_WAIT` Starvation**:
+   Polling every 1 second by creating and destroying ephemeral socket objects forces a continuous cycle of TCP handshakes (`SYN`, `SYN-ACK`, `ACK`), DP query exchanges, and socket closures (`FIN`/`RST`). Microcontrollers maintain a tiny pool of TCP Control Blocks (TCBs). Lingering sockets in `TIME_WAIT` state exhaust this pool, causing the chip to drop connections intermittently for 15–30 seconds until the OS reclaims memory.
+3. **802.11 DTIM Sleep Mode vs. Static Timeouts**:
+   To maintain sub-0.5W standby consumption, Tuya chips enter 802.11 DTIM light sleep. When waking up to respond to an incoming query, they may take 1.5–2.5 seconds to acknowledge. A static 2.0s timeout prematurely reports the device offline on minor Wi-Fi jitter.
+4. **Windows Multi-NIC & Virtual Adapter Route Metric Overrides**:
+   On Windows developer and server systems with **Tailscale** (`100.127.x.x`), **WSL Hyper-V** (`192.168.144.1`), or **VirtualBox** (`192.168.56.1`), the Windows socket layer frequently assigns route metrics that misdirect outbound packets away from the physical Wi-Fi NIC (`192.168.1.12`).
+5. **DHCP Dynamic IP Drift**:
+   When routers reboot or DHCP leases expire, plugs without static IP reservations are reassigned new IP addresses (e.g. from `.15` to `.18`), rendering hardcoded `.env` entries unreachable.
+
+---
+
+### B. Architectural Decision Making & Trade-Off Analysis
+
+During our technical design sessions, we evaluated multiple candidate architectures and made explicit design decisions to resolve these constraints:
+
+```mermaid
+flowchart TD
+    Start([Telemetry Poll / Switch Request]) --> Lock[Acquire per-device asyncio.Lock]
+    Lock --> CheckCooldown{In 15s Collision Cooldown?}
+    
+    CheckCooldown -- YES --> CloudFallback[Fetch via Tuya Cloud OpenAPI]
+    CheckCooldown -- NO --> CheckPool{Persistent Socket in Pool?}
+    
+    CheckPool -- Cached & Open --> FastProbe[Fast Probe: 1.5s Adaptive Timeout]
+    CheckPool -- Needs Reconnect --> FullConnect[Connect: 3.5s Timeout + 2 Retries]
+    
+    FastProbe --> QueryResult{Socket Success?}
+    FullConnect --> QueryResult
+    
+    QueryResult -- SUCCESS --> UpdateState[Reset Failures = 0, source='local']
+    QueryResult -- FAILURE / TIMEOUT --> ResetSock[Close Socket & Evict from Pool]
+    
+    ResetSock --> TriggerCooldown[Start 15s Cooldown]
+    TriggerCooldown --> CloudFallback
+    
+    CloudFallback --> CloudResult{Cloud Success?}
+    CloudResult -- SUCCESS --> UpdateCloudState[consecutive_failures = 0, source='cloud']
+    CloudResult -- FAILED --> IncFailures[consecutive_failures += 1]
+    
+    IncFailures --> CheckGrace{Failures >= 3?}
+    CheckGrace -- YES --> SetOffline[Set is_online = False]
+    CheckGrace -- NO --> KeepState[Keep is_online = True Grace Buffer]
+    
+    UpdateState --> BroadcastWS[Broadcast /ws & Commit DB]
+    UpdateCloudState --> BroadcastWS
+    SetOffline --> BroadcastWS
+    KeepState --> BroadcastWS
+```
+
+#### Decision 1: Persistent Connection Pooling vs. Ephemeral Sockets
+* **Problem**: Re-creating `tinytuya.OutletDevice` every second causes rapid socket churn, TCP handshake overhead (~60ms), and microcontroller socket exhaustion.
+* **Decision**: Maintain a module-level persistent device cache (`_device_pool: Dict[str, BoundOutletDevice]`) configured with `device.set_socketPersistent(True)` and `device.set_socketNODELAY(True)`.
+* **Trade-Off**: Holding a persistent socket reduces telemetry round-trip latency to **~15ms** and prevents socket exhaustion. However, it requires proactive teardown (`_check_socket_close(True)`) and cache eviction whenever device parameters change or socket errors occur.
+
+#### Decision 2: Adaptive Timeout Sensitivity (1.5s Probe $\rightarrow$ 3.5s Reconnect)
+* **Problem**: A fixed short timeout (e.g. 2s) fails during device sleep wake-up, while a fixed long timeout (e.g. 4s) blocks asynchronous polling workers when a device is genuinely disconnected.
+* **Decision**: Implement dynamic two-stage timeouts:
+  * **1.5-second fast probe**: Applied on already-open persistent sockets where the TCP connection is established.
+  * **3.5-second reconnect expansion**: Applied when opening a new socket or recovering from a dropped connection, paired with `set_socketRetryLimit(2)` and `set_socketRetryDelay(0.2s)`.
+* **Trade-Off**: Balances instantaneous response times during steady-state polling with maximum tolerance for Wi-Fi jitter during reconnection.
+
+#### Decision 3: 3-Miss Grace Buffer for Online/Offline UI State
+* **Problem**: Marking a plug offline on a single missed packet caused the Admin UI and live gauges to rapidly flicker between emerald (`ONLINE`) and crimson (`OFFLINE`).
+* **Decision**: Require **3 consecutive failed polling ticks** (`consecutive_failures >= 3`) before transitioning `plug.is_online = False` in `washqueue.db` and broadcasting offline over WebSockets. A single successful reading immediately resets `consecutive_failures = 0` and confirms online status.
+* **Trade-Off**: Transient 1–2 missed packets (e.g. during heavy microwave interference or brief sleep delays) are smoothly absorbed without alarming operators, while true power disconnections or unplugs are reliably flagged within 3–9 seconds.
+
+#### Decision 4: Fixed 15-Second Collision Cooldown with Cloud Fallback
+* **Problem**: When a resident opens the Tuya/Smart Life mobile app on the hostel Wi-Fi, the plug refuses local connections. Bombarding the plug with retries every second wastes CPU cycles and generates hundreds of connection refused logs.
+* **Decision**: When a local query fails due to conflict, register a **15-second cooldown** (`_collision_cooldown[device_id] = now + 15.0`). During cooldown, all telemetry and switch commands route immediately to the Tuya Cloud OpenAPI fallback. Once the cooldown expires, the engine performs a single quiet local probe to re-establish the fast local connection.
+* **Trade-Off**: Avoids port hammering, allows the mobile app session to complete smoothly, and maintains uninterrupted telemetry without data holes.
+
+#### Decision 5: Per-Device Concurrency Serialization (`asyncio.Lock`)
+* **Problem**: The background polling loop (`poll_all_smart_plugs`) and user-initiated actions (e.g. clicking the switch toggle `/api/smart-plugs/{id}/switch` or triggering a test cycle) run concurrently in FastAPI's asyncio event loop. Two tasks sending packets over port 6668 simultaneously cause packet interleaving, `DecodeError`, or `ERR_CONNECT`.
+* **Decision**: Implement an `asyncio.Lock` per device ID (`get_device_lock(device_id)`). Every operation targeting a physical plug acquires this lock before dispatching to the executor thread.
+* **Trade-Off**: Serializes operations with sub-millisecond queuing delay, completely eliminating intra-process race conditions.
+
+#### Decision 6: Clean Socket Subclassing (`BoundOutletDevice`) vs. Global Monkey-Patching
+* **Problem**: To bypass Windows VPN route capture, a previous workaround monkey-patched Python's global `socket.socket = wrapped_socket`. In a multi-threaded async environment, this caused race conditions across database connections, HTTP requests, and Tuya cloud calls.
+* **Decision**: Subclass `tinytuya.OutletDevice` into `BoundOutletDevice` overriding `_get_socket(renew)`. The method creates a standard `socket.socket`, binds only that instance to the physical Wi-Fi interface IP (`192.168.1.12`), and sets `TCP_NODELAY` without ever touching Python's global `socket` module.
+* **Trade-Off**: 100% clean isolation with zero side-effects on other libraries or threads.
+
+#### Decision 7: Smart Dual-Mode CLI Coordination (`read_plug.py` & `record_telemetry.py`)
+* **Problem**: Developers or operators running CLI tools while the FastAPI backend was running caused immediate port 6668 collisions between the terminal and the backend.
+* **Decision**: Built smart dual-mode into both CLI utilities:
+  * Probes `http://127.0.0.1:8000/api/smart-plugs`.
+  * If the backend is running, the CLI streams live telemetry from the backend's REST/WebSocket endpoints with zero port 6668 contention.
+  * If the backend is stopped, the CLI connects directly via `TuyaLocalProvider` using persistent pooling.
+* **Trade-Off**: Eliminates operator error and guarantees zero port contention during maintenance or data recording.
+
+---
+
+## 4. 4-Hour Historical Power Graph (Local vs. Cloud Differentiable)
 
 WashQueue stores and aggregates historical telemetry to graph power signatures over a rolling 4-hour window.
 
@@ -66,7 +164,7 @@ Headers:
 
 ---
 
-## 4. Visual Threshold Calibration Studio (Web UI)
+## 5. Visual Threshold Calibration Studio (Web UI)
 
 To allow non-technical hostel wardens and administrative staff to tune power thresholds without raw code or electrical engineering knowledge, WashQueue provides an **Interactive Graph & WebSocket Threshold Calibration Studio** directly in the Admin Panel (`/admin` -> **IoT & Smart Plugs** -> **Visual Calibration Studio**):
 
@@ -116,7 +214,7 @@ Headers:
 
 ---
 
-## 5. Washing Machine Power Profiles & Archetypes
+## 6. Washing Machine Power Profiles & Archetypes
 
 Different washing machine mechanisms produce vastly different electrical power signatures. Understanding these archetypes is critical for accurate inference:
 
@@ -129,7 +227,7 @@ Different washing machine mechanisms produce vastly different electrical power s
 
 ---
 
-## 6. Telemetry Logging, Simulation & Tuning Suite (CLI)
+## 7. Telemetry Logging, Simulation & Tuning Suite (CLI)
 
 For developers and power users, WashQueue provides dedicated command-line utilities in `backend/scripts/`:
 
@@ -138,16 +236,17 @@ For developers and power users, WashQueue provides dedicated command-line utilit
 python scripts/record_telemetry.py --machine "Washer 1" --interval 1.0
 ```
 * Polls local LAN socket every 1s (<20ms latency).
+* Features **smart dual-mode**: automatically routes through the active FastAPI backend API if running to prevent port 6668 collision, or connects directly if standalone.
 * Streams real-time console dashboard (Timestamp, Watts, Volts, Current, Inferred State).
 * Simultaneously writes high-res data to `telemetry_logs/telemetry_washer_1_<timestamp>.csv` and `washqueue.db`.
 * On <kbd>Ctrl</kbd>+<kbd>C</kbd>, generates full cycle report (peak spin power, baseline standby, longest soak pause) and auto-updates the plug's thresholds in the database.
 
-### B. Synthetic Cycle Simulator (`simulate_wash_cycle.py`)
+### B. Synthetic Cycle Simulator (`scripts/diagnostics/simulate_wash_cycle.py`)
 ```powershell
-python scripts/simulate_wash_cycle.py --minutes 30
+python scripts/diagnostics/simulate_wash_cycle.py --minutes 30
 ```
 * Generates a complete physics-based washing machine power profile (fill, agitation, soak pause, rinse, spin, standby) into `washqueue.db` and CSV in ~5 seconds.
-* Tests candidate thresholds against the synthetic dataset and flags premature soak triggers.
+* Useful for offline algorithm testing when physical appliances are not running. Tests candidate thresholds against synthetic data and flags premature soak triggers.
 
 ### C. Offline CSV Benchmark Tuner (`tune_from_csv.py`)
 ```powershell
@@ -162,15 +261,24 @@ python scripts/export_telemetry.py --device-id d7fa4d27a2883bb4feqvhl --hours 24
 ```
 * Dumps stored time-series readings from SQLite (`washqueue.db`) to CSV or JSON.
 
-### E. Continuous Background Logger Daemon (`run_background_logger.py`)
+### E. Live Plug Diagnostic Inspector (`scripts/diagnostics/read_plug.py`)
 ```powershell
-python scripts/run_background_logger.py --interval 2.0
+python scripts/diagnostics/read_plug.py
 ```
-* Passive headless daemon that continuously logs live smart plug telemetry into `washqueue.db`.
+* Instant snapshot inspector for live smart plug voltage, wattage, and current.
+* Features **smart dual-mode**: queries active backend API if running, or direct socket if backend is stopped.
+
+### F. Maintenance & Recovery (`scripts/maintenance/`)
+```powershell
+python scripts/maintenance/repair_db.py
+python scripts/maintenance/clean_reset_db.py
+```
+* **`repair_db.py`**: Emergency repair utility to rescue records from corrupted SQLite databases and enable WAL mode.
+* **`clean_reset_db.py`**: Wipes transient bookings/telemetry and resets machines to clean baseline.
 
 ---
 
-## 7. Database Persistence & Network Architecture
+## 8. Database Persistence & Network Architecture
 
 ### SQLite WAL Mode (Write-Ahead Logging)
 * `backend/washqueue.db` operates in **WAL mode** (`PRAGMA journal_mode=WAL`) with `PRAGMA synchronous=NORMAL`.
@@ -179,11 +287,11 @@ python scripts/run_background_logger.py --interval 2.0
 
 ### Subnet Interface Auto-Binding (Multi-Homed / VPN Robustness)
 * Windows machines with active VPNs (such as **Tailscale**) frequently advertise route metrics of `0` for `192.168.1.0/24`, causing default OS sockets to route local LAN packets into the virtual VPN interface.
-* [`TuyaLocalProvider`](file:///d:/lab/projects/washqueue/backend/app/smart_plug_providers/tuya_local.py) automatically identifies the local physical NIC matching the plug's subnet (`192.168.1.12`) and binds before connecting, ensuring 100% reliable <20ms local communication.
+* [`TuyaLocalProvider`](file:///d:/lab/projects/washqueue/backend/app/smart_plug_providers/tuya_local.py) uses `BoundOutletDevice` to bind specifically to the local physical NIC matching the plug's subnet (`192.168.1.12`) before connecting, ensuring 100% reliable <20ms local communication with zero global socket monkey-patching.
 
 ---
 
-## 8. Remote Relay Switching
+## 9. Remote Relay Switching
 
 Operators can turn the smart plug ON or OFF remotely via the Admin dashboard or REST API:
 
@@ -193,13 +301,14 @@ Headers:
   X-Admin-PIN: 1234
 ```
 
-1. **Local Socket First**: Sends `turn_on()` / `turn_off()` over direct LAN socket.
-2. **Cloud API Fallback**: If local socket is unreachable, dispatches the command via Tuya OpenAPI.
-3. **Optimistic UI Update**: Button state updates instantly upon confirmation.
+1. **Per-Device Async Lock**: Serializes command with background telemetry loop to prevent port collisions.
+2. **Local Socket First**: Sends `turn_on()` / `turn_off()` over direct persistent LAN socket.
+3. **Cloud API Fallback**: If local socket is in collision cooldown or unreachable, dispatches the command via Tuya OpenAPI.
+4. **Optimistic UI Update**: Button state updates instantly upon confirmation.
 
 ---
 
-## 9. Power State Inference & Debounce Logic
+## 10. Power State Inference & Debounce Logic
 
 | Detected Power Draw | Inferred Machine State | Description |
 | :--- | :--- | :--- |

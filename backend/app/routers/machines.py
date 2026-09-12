@@ -8,7 +8,7 @@ from sqlalchemy import select
 try:
     from app.database import get_db
     from app.schemas import (
-        MachineResponse, BookingResponse, QueueResponse,
+        MachineCreate, MachineResponse, BookingResponse, QueueResponse,
         MachineDetailResponse, ClaimRequest, PingRequest, QueueJoinRequest,
         TelemetryHistoryResponse, TelemetryHistoryPoint
     )
@@ -21,7 +21,7 @@ try:
 except ImportError:
     from ..database import get_db
     from ..schemas import (
-        MachineResponse, BookingResponse, QueueResponse,
+        MachineCreate, MachineResponse, BookingResponse, QueueResponse,
         MachineDetailResponse, ClaimRequest, PingRequest, QueueJoinRequest,
         TelemetryHistoryResponse, TelemetryHistoryPoint
     )
@@ -75,6 +75,27 @@ async def get_machines(db: AsyncSession = Depends(get_db)):
         )
     return response
 
+
+@router.post("", response_model=MachineResponse, status_code=status.HTTP_201_CREATED)
+async def create_machine(req: MachineCreate, db: AsyncSession = Depends(get_db)):
+    """
+    Creates a new machine (e.g. Washer 1, Dryer 1).
+    """
+    machine = await MachineRepository.create(db, name=req.name.strip(), status=req.status or "available")
+    await db.commit()
+    return MachineResponse.model_validate(machine)
+
+
+@router.delete("/{id}")
+async def delete_machine(id: UUID, db: AsyncSession = Depends(get_db)):
+    """
+    Deletes a machine and unlinks/cascades its bookings and queue entries.
+    """
+    deleted = await MachineRepository.delete(db, id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    await db.commit()
+    return {"status": "success", "message": "Machine deleted successfully"}
 
 
 @router.post("/{id}/claim", response_model=MachineDetailResponse)
@@ -358,7 +379,10 @@ async def get_machine_power_history(
 
     series = [
         TelemetryHistoryPoint(
-            timestamp=r.recorded_at.isoformat() if r.recorded_at else "",
+            timestamp=(
+                (r.recorded_at.replace(tzinfo=datetime.timezone.utc) if r.recorded_at.tzinfo is None else r.recorded_at)
+                .isoformat().replace("+00:00", "Z")
+            ) if r.recorded_at else "",
             power_w=round(r.power_w or 0.0, 1),
             voltage_v=round(r.voltage_v, 1) if r.voltage_v is not None else None,
             current_ma=round(r.current_ma, 1) if r.current_ma is not None else None,

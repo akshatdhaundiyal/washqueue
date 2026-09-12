@@ -33,6 +33,22 @@ class MachineRepository:
         )
         return await MachineRepository.get_by_id(db, machine_id)
 
+    @staticmethod
+    async def create(db: AsyncSession, name: str, status: str = "available") -> Machine:
+        machine = Machine(name=name, status=status)
+        db.add(machine)
+        await db.flush()
+        return machine
+
+    @staticmethod
+    async def delete(db: AsyncSession, machine_id: UUID) -> bool:
+        machine = await MachineRepository.get_by_id(db, machine_id)
+        if not machine:
+            return False
+        await db.delete(machine)
+        await db.flush()
+        return True
+
 
 class BookingRepository:
     @staticmethod

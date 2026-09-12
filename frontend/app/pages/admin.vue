@@ -94,6 +94,21 @@ const openPowerGraph = async (plug) => {
   }
 }
 
+// Background / On-demand silent refresh of active power graph directly from database
+const refreshPowerGraphHistory = async (silent = true) => {
+  if (!isGraphModalOpen.value || !graphPlug.value?.id) return
+  if (!silent) historyLoading.value = true
+  const headers = { 'X-Admin-PIN': inputPin.value }
+  try {
+    const data = await $fetch(`${apiBase}/api/smart-plugs/${graphPlug.value.id}/history?hours=4`, { headers })
+    activeHistory.value = data
+  } catch (err) {
+    if (!silent) addToast('Failed to refresh telemetry history from database.', 'error')
+  } finally {
+    if (!silent) historyLoading.value = false
+  }
+}
+
 // Open Visual Threshold Tuner Studio
 const openThresholdTuner = async (plug) => {
   tunerPlug.value = plug
@@ -427,6 +442,55 @@ const forceClearMachine = async (machineId) => {
   }
 }
 
+// Machine Fleet Management (Create & Delete)
+const isAddMachineModalOpen = ref(false)
+const newMachineName = ref('')
+const isSubmittingMachine = ref(false)
+
+const openAddMachineModal = () => {
+  newMachineName.value = ''
+  isAddMachineModalOpen.value = true
+}
+
+const saveNewMachine = async () => {
+  if (!newMachineName.value.trim()) return
+  isSubmittingMachine.value = true
+  const headers = { 'X-Admin-PIN': inputPin.value }
+  try {
+    await $fetch(`${apiBase}/api/machines`, {
+      method: 'POST',
+      headers,
+      body: { name: newMachineName.value.trim(), status: 'available' }
+    })
+    addToast(`Machine "${newMachineName.value.trim()}" created successfully!`, 'success')
+    isAddMachineModalOpen.value = false
+    newMachineName.value = ''
+    fetchAdminData()
+  } catch (err) {
+    addToast(err?.data?.detail || 'Failed to create machine.', 'error')
+  } finally {
+    isSubmittingMachine.value = false
+  }
+}
+
+const handleDeleteMachine = async (machineId) => {
+  const target = adminMachines.value.find(m => m.id === machineId)
+  const name = target?.name || 'this machine'
+  if (!confirm(`Are you sure you want to remove "${name}" from the fleet?`)) return
+
+  const headers = { 'X-Admin-PIN': inputPin.value }
+  try {
+    await $fetch(`${apiBase}/api/machines/${machineId}`, {
+      method: 'DELETE',
+      headers
+    })
+    addToast(`Machine "${name}" deleted.`, 'info')
+    fetchAdminData()
+  } catch (err) {
+    addToast(err?.data?.detail || 'Failed to delete machine.', 'error')
+  }
+}
+
 // Trigger overdue scheduler tick manually
 const triggerSchedulerTick = async () => {
   const headers = { 'X-Admin-PIN': inputPin.value }
@@ -739,6 +803,8 @@ const exportQueryResults = () => {
               :dark-mode="darkMode"
               @check-overdue="triggerSchedulerTick"
               @force-clear="forceClearMachine"
+              @add-machine="openAddMachineModal"
+              @delete-machine="handleDeleteMachine"
             />
 
             <!-- TAB 2: SMART PLUGS & IOT TELEMETRY -->
@@ -853,6 +919,7 @@ const exportQueryResults = () => {
       :loading="historyLoading"
       :dark-mode="darkMode"
       @close="isGraphModalOpen = false"
+      @refresh="refreshPowerGraphHistory"
     />
 
     <!-- VISUAL THRESHOLD CALIBRATION STUDIO MODAL (FOR NON-TECH ADMINS) -->
@@ -877,6 +944,54 @@ const exportQueryResults = () => {
       @close="isModalOpen = false"
       @save="saveSmartPlug"
     />
+
+    <!-- ADD MACHINE MODAL -->
+    <div v-if="isAddMachineModalOpen" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+      <div 
+        class="rounded-[28px] p-6 max-w-sm w-full space-y-4 border shadow-2xl transition-all animate-fadeIn"
+        :class="darkMode ? 'bg-[#121824] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'"
+      >
+        <div class="flex items-center justify-between border-b pb-3" :class="darkMode ? 'border-white/10' : 'border-slate-100'">
+          <h3 class="text-sm font-mono font-bold uppercase">ADD_NEW_MACHINE</h3>
+          <button 
+            @click="isAddMachineModalOpen = false" 
+            class="font-mono transition p-1.5 rounded-lg"
+            :class="darkMode ? 'text-slate-400 hover:text-white' : 'text-slate-400 hover:text-slate-700'"
+          >✕</button>
+        </div>
+
+        <form @submit.prevent="saveNewMachine" class="space-y-4 font-mono text-xs">
+          <div>
+            <label class="block font-medium mb-1" :class="darkMode ? 'text-slate-300' : 'text-slate-700'">Machine Name</label>
+            <input 
+              v-model="newMachineName" 
+              required 
+              placeholder="e.g. Washer 2 or Dryer 1" 
+              class="w-full rounded-xl p-2.5 border focus:outline-none focus:border-emerald-500"
+              :class="darkMode ? 'bg-[#0a0e17] border-white/10 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'"
+            />
+          </div>
+
+          <div class="flex justify-end gap-2 pt-2">
+            <button 
+              type="button" 
+              @click="isAddMachineModalOpen = false" 
+              class="px-4 py-2 rounded-xl border text-xs transition"
+              :class="darkMode ? 'border-white/10 hover:bg-slate-800 text-slate-300' : 'border-slate-200 hover:bg-slate-100 text-slate-600'"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              :disabled="isSubmittingMachine"
+              class="px-4 py-2 bg-emerald-500 text-slate-900 font-bold rounded-xl text-xs hover:bg-emerald-400 transition"
+            >
+              {{ isSubmittingMachine ? 'Creating...' : 'Create Machine' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <!-- TOAST NOTIFICATIONS FLOATING STACK -->
     <AdminToastStack :toasts="toasts" />

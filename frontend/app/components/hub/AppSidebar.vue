@@ -1,4 +1,5 @@
 <script setup>
+import { ref, onMounted } from 'vue'
 import {
   Waves,
   Disc,
@@ -12,6 +13,17 @@ import {
 import AppLogo from '~/components/common/AppLogo.vue'
 
 const { institutionName, hostelName } = useHostelBranding()
+
+const studentUser = ref(null)
+
+onMounted(() => {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('washqueue_student_user')
+      studentUser.value = raw ? JSON.parse(raw) : null
+    } catch (e) {}
+  }
+})
 
 const props = defineProps({
   activeTab: {
@@ -201,10 +213,10 @@ const emit = defineEmits(['update:activeTab', 'open-settings', 'set-theme'])
           </div>
           <div class="min-w-0 flex-1">
             <h4 class="text-xs font-bold text-slate-900 dark:text-white truncate">
-              Akshat Dhaundiyal
+              {{ studentUser?.name || 'Resident' }}
             </h4>
             <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-              Room 214 • Block B
+              {{ studentUser?.room_number ? `Room ${studentUser.room_number}` : 'Tap to sign in' }}
             </p>
           </div>
         </div>

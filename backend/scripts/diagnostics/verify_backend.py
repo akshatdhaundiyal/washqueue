@@ -1,8 +1,13 @@
 import asyncio
 import datetime
 import uuid
+import os
+import sys
 
-# Native module imports within the backend workspace
+# Ensure backend root is in sys.path (three levels up from backend/scripts/diagnostics/)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, BASE_DIR)
+
 from app.database import Base
 from app.models import Machine, Booking, Queue
 from app.repositories import MachineRepository, BookingRepository, QueueRepository

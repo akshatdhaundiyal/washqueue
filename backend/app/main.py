@@ -48,40 +48,57 @@ async def lifespan(app: FastAPI):
                 pass
 
         await conn.run_sync(migrate_user_columns)
-    # Auto-seed initial machines and users if empty
+    # Ensure baseline Washer 1, Admin User, and real Smart Plug exist if empty (clean initial startup)
     from sqlalchemy import select
     try:
         from app.database import async_session
-        from app.models import Machine, User
+        from app.models import Machine, User, SmartPlug
     except ImportError:
         from .database import async_session
-        from .models import Machine, User
-
+        from .models import Machine, User, SmartPlug
 
     async with async_session() as db:
         res = await db.execute(select(Machine))
-        if not res.scalars().first():
-            initial_machines = [
-                Machine(name="Washer 1", status="available"),
-                Machine(name="Washer 2", status="available"),
-                Machine(name="Washer 3", status="available"),
-                Machine(name="Washer 4", status="available"),
-                Machine(name="Dryer 1", status="available"),
-                Machine(name="Dryer 2", status="available"),
-                Machine(name="Dryer 3", status="available"),
-                Machine(name="Dryer 4", status="available"),
-            ]
-            db.add_all(initial_machines)
-            
+        w1 = res.scalars().first()
+        if not w1:
+            w1 = Machine(name="Washer 1", status="available")
+            db.add(w1)
+            await db.flush()
+
+        res_user = await db.execute(select(User).where(User.is_admin.is_(True)))
+        if not res_user.scalars().first():
             import uuid
-            initial_users = [
-                User(id=uuid.UUID('11111111-1111-1111-1111-111111111111'), name="Alex (User A)", email="alex@hostel.edu", is_admin=False),
-                User(id=uuid.UUID('22222222-2222-2222-2222-222222222222'), name="Blake (User B)", email="blake@hostel.edu", is_admin=False),
-                User(id=uuid.UUID('33333333-3333-3333-3333-333333333333'), name="Charlie (User C)", email="charlie@hostel.edu", is_admin=False),
-                User(id=uuid.UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), name="Hostel Admin", email="admin@hostel.edu", is_admin=True),
-            ]
-            db.add_all(initial_users)
-            await db.commit()
+            admin_user = User(
+                id=uuid.UUID('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+                name="Hostel Admin",
+                email="admin@hostel.edu",
+                role="admin",
+                is_admin=True
+            )
+            db.add(admin_user)
+
+        res_plug = await db.execute(select(SmartPlug))
+        if not res_plug.scalars().first():
+            import os
+            dev_id = os.getenv("TUYA_DEVICE_ID", "d7fa4d27a2883bb4feqvhl")
+            dev_ip = os.getenv("TUYA_DEVICE_IP", "192.168.1.15")
+            dev_key = os.getenv("TUYA_LOCAL_KEY", "X@iLAIv|R(t(/(su")
+            dev_mac = os.getenv("TUYA_DEVICE_MAC", "d8:1f:12:48:94:c7")
+            if dev_id and dev_key and w1:
+                db.add(SmartPlug(
+                    machine_id=w1.id,
+                    name="Washer 1 Smart Plug",
+                    device_id=dev_id,
+                    local_key=dev_key,
+                    ip_address=dev_ip,
+                    mac_address=dev_mac,
+                    protocol_version="3.3",
+                    power_threshold_running=10.0,
+                    power_threshold_idle=5.0,
+                    debounce_seconds=120,
+                    is_online=True
+                ))
+        await db.commit()
 
     # Launch background workers
     telemetry_task = asyncio.create_task(

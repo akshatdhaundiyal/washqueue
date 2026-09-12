@@ -1,0 +1,4 @@
+timestamp_iso,elapsed_seconds,power_w,voltage_v,current_ma,energy_kwh,switch_on,source,inferred_state
+2026-09-12T17:33:31.830342,0.00,0.0,207.4,0.0,0.01,True,local,IDLE/OFF
+2026-09-12T17:33:32.972028,1.14,0.0,207.4,0.0,0.01,True,local,IDLE/OFF
+2026-09-12T17:33:34.208272,2.38,0.0,207.4,0.0,0.01,True,local,IDLE/OFF

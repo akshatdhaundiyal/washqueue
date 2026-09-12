@@ -23,6 +23,10 @@ class Settings(BaseSettings):
         default=None,
         alias="CLOUD_DATABASE_URL"
     )
+    tuya_cloud_time_offset_seconds: float = Field(
+        default=0.0,
+        alias="TUYA_CLOUD_TIME_OFFSET_SECONDS"
+    )
 
     class Config:
         env_file = ".env"

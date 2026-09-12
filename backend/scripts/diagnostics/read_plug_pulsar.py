@@ -11,13 +11,14 @@ if sys.platform == "win32":
 from tuya_connector import TuyaOpenPulsar, TuyaCloudPulsarTopic
 from dotenv import load_dotenv
 
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("tuya-pulsar")
 
 # Load configuration from environment variables or tinytuya.json
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "tinytuya.json")
+CONFIG_FILE = os.path.join(BASE_DIR, "tinytuya.json")
 if os.getenv("TUYA_ACCESS_ID"):
     ACCESS_ID = os.getenv("TUYA_ACCESS_ID", "")
     ACCESS_SECRET = os.getenv("TUYA_ACCESS_SECRET", "")

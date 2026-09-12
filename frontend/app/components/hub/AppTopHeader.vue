@@ -82,7 +82,7 @@ const emit = defineEmits(['open-settings', 'view-profile', 'notify-click'])
         >
           <img
             src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&h=120&fit=crop&crop=faces"
-            alt="Akshat Profile"
+            alt="Resident Profile"
             :class="[
               'w-9 h-9 rounded-full object-cover ring-2 transition-all',
               activeTab === 'profile' ? 'ring-slate-900 dark:ring-white scale-105' : 'ring-slate-200 dark:ring-slate-700'
@@ -170,7 +170,7 @@ const emit = defineEmits(['open-settings', 'view-profile', 'notify-click'])
         >
           <img
             src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&h=120&fit=crop&crop=faces"
-            alt="Akshat Profile"
+            alt="Resident Profile"
             :class="[
               'w-10 h-10 rounded-full object-cover ring-2 transition-all',
               activeTab === 'profile' ? 'ring-slate-900 dark:ring-white scale-105' : 'ring-slate-200 dark:ring-slate-700'
